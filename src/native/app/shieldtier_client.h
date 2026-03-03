@@ -6,10 +6,12 @@
 #include "include/cef_client.h"
 #include "include/cef_display_handler.h"
 #include "include/cef_life_span_handler.h"
+#include "include/wrapper/cef_message_router.h"
 
 #include "browser/request_handler.h"
 #include "browser/download_handler.h"
 #include "browser/session_manager.h"
+#include "ipc/message_handler.h"
 
 class ShieldTierClient : public CefClient,
                          public CefLifeSpanHandler,
@@ -42,6 +44,12 @@ public:
     void OnTitleChange(CefRefPtr<CefBrowser> browser,
                        const CefString& title) override;
 
+    // CefClient
+    bool OnProcessMessageReceived(CefRefPtr<CefBrowser> browser,
+                                  CefRefPtr<CefFrame> frame,
+                                  CefProcessId source_process,
+                                  CefRefPtr<CefProcessMessage> message) override;
+
     shieldtier::SessionManager* session_manager() {
         return session_manager_.get();
     }
@@ -50,6 +58,8 @@ private:
     CefRefPtr<shieldtier::RequestHandler> request_handler_;
     CefRefPtr<shieldtier::DownloadHandler> download_handler_;
     std::unique_ptr<shieldtier::SessionManager> session_manager_;
+    CefRefPtr<CefMessageRouterBrowserSide> message_router_;
+    std::unique_ptr<shieldtier::MessageHandler> message_handler_;
 
     CefRefPtr<CefBrowser> browser_;
     int browser_count_ = 0;

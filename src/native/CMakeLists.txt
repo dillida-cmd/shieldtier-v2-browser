@@ -4,11 +4,13 @@ set(SHIELDTIER_SOURCES
     app/main.cpp
     app/shieldtier_app.cpp
     app/shieldtier_client.cpp
+    app/shieldtier_renderer_app.cpp
     browser/request_handler.cpp
     browser/response_filter.cpp
     browser/download_handler.cpp
     browser/session_manager.cpp
     browser/navigation.cpp
+    ipc/message_handler.cpp
 )
 
 add_executable(shieldtier ${SHIELDTIER_SOURCES})

@@ -1,4 +1,5 @@
 #include "app/shieldtier_app.h"
+#include "app/shieldtier_renderer_app.h"
 
 #include "include/cef_app.h"
 #include "include/cef_command_line.h"
@@ -20,7 +21,8 @@ int main(int argc, char* argv[]) {
 
 #endif
 
-    int exit_code = CefExecuteProcess(main_args, nullptr, nullptr);
+    CefRefPtr<ShieldTierRendererApp> renderer_app(new ShieldTierRendererApp());
+    int exit_code = CefExecuteProcess(main_args, renderer_app.get(), nullptr);
     if (exit_code >= 0) {
         return exit_code;
     }
