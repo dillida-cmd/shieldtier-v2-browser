@@ -4,6 +4,11 @@
 #include <fstream>
 #include <sstream>
 
+#ifdef _POSIX_VERSION
+#include <fcntl.h>
+#include <unistd.h>
+#endif
+
 namespace shieldtier {
 
 ConfigStore::ConfigStore(const std::string& config_path)
@@ -79,11 +84,22 @@ Result<bool> ConfigStore::write_atomic(const std::string& path, const std::strin
     file.flush();
 
     if (file.fail()) {
+        file.close();
+        std::remove(tmp_path.c_str());
         return Error("Failed to write config data", "write_error");
     }
     file.close();
 
+#ifdef _POSIX_VERSION
+    int fd = ::open(tmp_path.c_str(), O_RDONLY);
+    if (fd >= 0) {
+        ::fdatasync(fd);
+        ::close(fd);
+    }
+#endif
+
     if (std::rename(tmp_path.c_str(), path.c_str()) != 0) {
+        std::remove(tmp_path.c_str());
         return Error("Failed to rename temp file to config path", "rename_error");
     }
 

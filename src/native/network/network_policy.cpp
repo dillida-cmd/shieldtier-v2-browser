@@ -4,13 +4,27 @@
 
 namespace shieldtier {
 
+namespace {
+
+std::string extract_host(const std::string& url) {
+    size_t start = url.find("://");
+    if (start == std::string::npos) return url;
+    start += 3;
+    size_t end = url.find_first_of(":/?\#", start);
+    if (end == std::string::npos) return url.substr(start);
+    return url.substr(start, end - start);
+}
+
+}  // namespace
+
 NetworkPolicy::NetworkPolicy() = default;
 
 bool NetworkPolicy::should_allow(const std::string& url) const {
     std::lock_guard<std::mutex> lock(mutex_);
+    std::string host = extract_host(url);
 
     for (const auto& rule : rules_) {
-        if (url.find(rule.pattern) != std::string::npos) {
+        if (host.find(rule.pattern) != std::string::npos) {
             return rule.allow;
         }
     }

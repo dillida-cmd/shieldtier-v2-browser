@@ -1,9 +1,11 @@
 #include "auth/auth_manager.h"
 
-#include <algorithm>
 #include <chrono>
+#include <cstddef>
 #include <set>
 #include <unordered_map>
+
+#include <sodium.h>
 
 namespace shieldtier {
 
@@ -18,48 +20,15 @@ static const std::unordered_map<std::string, std::set<std::string>> kTierFeature
 };
 
 static std::string base64url_decode(const std::string& input) {
-    std::string b64 = input;
-    std::replace(b64.begin(), b64.end(), '-', '+');
-    std::replace(b64.begin(), b64.end(), '_', '/');
-
-    while (b64.size() % 4 != 0) {
-        b64.push_back('=');
-    }
-
-    static constexpr char kTable[] =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-    auto val_of = [](char c) -> int {
-        if (c >= 'A' && c <= 'Z') return c - 'A';
-        if (c >= 'a' && c <= 'z') return c - 'a' + 26;
-        if (c >= '0' && c <= '9') return c - '0' + 52;
-        if (c == '+') return 62;
-        if (c == '/') return 63;
-        return -1;
-    };
-    (void)kTable;
-
-    std::string output;
-    output.reserve(b64.size() * 3 / 4);
-
-    for (size_t i = 0; i < b64.size(); i += 4) {
-        int a = val_of(b64[i]);
-        int b = (i + 1 < b64.size()) ? val_of(b64[i + 1]) : 0;
-        int c = (i + 2 < b64.size()) ? val_of(b64[i + 2]) : 0;
-        int d = (i + 3 < b64.size()) ? val_of(b64[i + 3]) : 0;
-
-        if (a < 0 || b < 0) break;
-
-        output.push_back(static_cast<char>((a << 2) | (b >> 4)));
-        if (b64[i + 2] != '=' && c >= 0) {
-            output.push_back(static_cast<char>(((b & 0x0F) << 4) | (c >> 2)));
-        }
-        if (b64[i + 3] != '=' && d >= 0) {
-            output.push_back(static_cast<char>(((c & 0x03) << 6) | d));
-        }
-    }
-
-    return output;
+    std::vector<uint8_t> buf(input.size());
+    size_t decoded_len = 0;
+    int rc = sodium_base642bin(
+        buf.data(), buf.size(),
+        input.c_str(), input.size(),
+        nullptr, &decoded_len, nullptr,
+        sodium_base64_VARIANT_URLSAFE_NO_PADDING);
+    if (rc != 0) return {};
+    return std::string(reinterpret_cast<const char*>(buf.data()), decoded_len);
 }
 
 bool AuthToken::is_expired() const {
@@ -86,11 +55,10 @@ Result<AuthToken> AuthManager::validate_token(const std::string& jwt) {
     token.expires_at = payload.value("exp", int64_t{0});
     token.tier = tier_from_string(payload.value("tier", "free"));
 
+    std::lock_guard<std::mutex> lock(mutex_);
     if (token.is_expired()) {
         return Error("Token has expired", "token_expired");
     }
-
-    std::lock_guard<std::mutex> lock(mutex_);
     current_token_ = token;
     return token;
 }
@@ -117,6 +85,7 @@ void AuthManager::clear_token() {
 
 bool AuthManager::has_feature(const std::string& feature) const {
     std::lock_guard<std::mutex> lock(mutex_);
+    if (current_token_.token.empty() || current_token_.is_expired()) return false;
 
     std::string tier_str;
     switch (current_token_.tier) {
