@@ -46,10 +46,10 @@ std::string Defang::defang_url(const std::string& url) {
     std::string result = url;
 
     size_t scheme_end = 0;
-    if (result.substr(0, 8) == "https://") {
+    if (result.starts_with("https://")) {
         result = "hxxps://" + result.substr(8);
         scheme_end = 8;
-    } else if (result.substr(0, 7) == "http://") {
+    } else if (result.starts_with("http://")) {
         result = "hxxp://" + result.substr(7);
         scheme_end = 7;
     } else {
@@ -148,11 +148,10 @@ std::string Defang::defang_all(const std::string& text) {
         result = std::move(out);
     }
 
-    // Standalone IPs — match digit groups separated by dots, surrounded by
-    // word boundaries (negative lookbehind for :// to skip URLs already handled)
+    // Standalone IPs — no lookbehind (unsupported by std::regex ECMAScript)
     {
         static const std::regex ip_re(
-            R"((?:^|(?<=[\s,;:"'(\[]))(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})(?=[\s,;:"')\]$]|$))");
+            R"((\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}))");
         std::string out;
         std::sregex_iterator it(result.begin(), result.end(), ip_re);
         std::sregex_iterator end;
@@ -162,23 +161,22 @@ std::string Defang::defang_all(const std::string& text) {
             auto& match = *it;
             out += result.substr(last_pos, match.position() - last_pos);
 
-            // Only defang if this IP isn't already inside a defanged URL
-            std::string ip_str = match[1].matched ? match.str(1) : match.str();
+            // Skip IPs already inside defanged URLs (check preceding chars)
             bool inside_url = false;
-            if (match.position() >= 6) {
-                std::string preceding = result.substr(
-                    match.position() > 10 ? match.position() - 10 : 0,
-                    match.position() - (match.position() > 10 ? match.position() - 10 : 0));
+            size_t pos = static_cast<size_t>(match.position());
+            if (pos >= 3) {
+                size_t check_start = (pos > 12) ? pos - 12 : 0;
+                std::string preceding = result.substr(check_start, pos - check_start);
                 if (preceding.find("://") != std::string::npos ||
-                    preceding.find("[://]") != std::string::npos) {
+                    preceding.find("hxxp") != std::string::npos) {
                     inside_url = true;
                 }
             }
 
             if (inside_url) {
-                out += match.str();
+                out += match.str(1);
             } else {
-                out += defang_ip(match.str());
+                out += defang_ip(match.str(1));
             }
             last_pos = match.position() + match.length();
         }

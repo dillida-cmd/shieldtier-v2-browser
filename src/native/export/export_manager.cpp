@@ -1,7 +1,9 @@
 #include "export/export_manager.h"
 
 #include <chrono>
+#include <cstdio>
 #include <ctime>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <sstream>
@@ -104,10 +106,10 @@ bool add_archive_entry(struct archive* a, const std::string& name,
         return false;
     }
 
-    archive_write_data(a, content.data(),
-                       static_cast<size_t>(content.size()));
+    la_ssize_t written = archive_write_data(
+        a, content.data(), static_cast<size_t>(content.size()));
     archive_entry_free(entry);
-    return true;
+    return written == static_cast<la_ssize_t>(content.size());
 }
 
 }  // namespace
@@ -120,14 +122,19 @@ void ExportManager::set_template_dir(const std::string& dir) {
 
 Result<std::string> ExportManager::export_json(const ThreatVerdict& verdict,
                                                 const std::string& filename) {
+    // Defang individual fields before serialization to avoid corrupting JSON structure
+    ThreatVerdict defanged_verdict = verdict;
+    for (auto& f : defanged_verdict.findings) {
+        f.title = Defang::defang_all(f.title);
+        f.description = Defang::defang_all(f.description);
+    }
+
     json j;
-    j["filename"] = filename;
-    j["verdict"] = verdict;
+    j["filename"] = Defang::defang_all(filename);
+    j["verdict"] = defanged_verdict;
     j["generated_at"] = current_timestamp();
 
-    std::string raw = j.dump(4);
-    std::string defanged = Defang::defang_all(raw);
-    return defanged;
+    return j.dump(4);
 }
 
 Result<std::string> ExportManager::export_html(const ThreatVerdict& verdict,
@@ -157,7 +164,7 @@ Result<std::string> ExportManager::export_zip(const ThreatVerdict& verdict,
     metadata["report_version"] = "2.0";
     std::string metadata_str = metadata.dump(4);
 
-    std::string zip_path = output_dir + "/shieldtier-report.zip";
+    std::string zip_path = (std::filesystem::path(output_dir) / "shieldtier-report.zip").string();
 
     struct archive* a = archive_write_new();
     if (!a) {
@@ -181,6 +188,7 @@ Result<std::string> ExportManager::export_zip(const ThreatVerdict& verdict,
     archive_write_free(a);
 
     if (!ok) {
+        std::filesystem::remove(zip_path);
         return Error{"Failed to write archive entries", "zip_write_fail"};
     }
 
