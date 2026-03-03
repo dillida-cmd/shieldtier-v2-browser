@@ -1,5 +1,7 @@
 #include "browser/session_manager.h"
 
+#include <filesystem>
+
 #include "include/cef_cookie.h"
 
 namespace shieldtier {
@@ -21,7 +23,7 @@ void SessionManager::create_tab(const std::string& url, bool in_memory,
         CefRequestContext::CreateContext(ctx_settings, nullptr);
 
     CefWindowInfo window_info;
-#if defined(OS_WIN)
+#if defined(_WIN32)
     window_info.SetAsPopup(nullptr, "ShieldTier");
 #endif
 
@@ -34,8 +36,10 @@ void SessionManager::create_tab(const std::string& url, bool in_memory,
 
     pending_tabs_[tab_id] = info;
 
-    CefBrowserHost::CreateBrowser(window_info, client, url,
-                                  browser_settings, nullptr, context);
+    if (!CefBrowserHost::CreateBrowser(window_info, client, url,
+                                       browser_settings, nullptr, context)) {
+        pending_tabs_.erase(tab_id);
+    }
 }
 
 void SessionManager::close_tab(int browser_id) {
@@ -47,6 +51,7 @@ void SessionManager::close_tab(int browser_id) {
     auto tab_it = tabs_.find(it->second);
     if (tab_it != tabs_.end() && tab_it->second.browser) {
         tab_it->second.browser->GetHost()->CloseBrowser(true);
+        tab_it->second.browser = nullptr;
     }
 }
 
@@ -97,16 +102,13 @@ void SessionManager::clear_tab_data(int browser_id) {
 void SessionManager::on_browser_created(CefRefPtr<CefBrowser> browser) {
     int cef_id = browser->GetIdentifier();
 
-    // Match to pending tab by comparing request contexts. Each tab gets a
-    // unique CefRequestContext, so IsSame() is a reliable correlator even
-    // when multiple CreateBrowser calls are in-flight concurrently.
     CefRefPtr<CefRequestContext> browser_ctx =
         browser->GetHost()->GetRequestContext();
     for (auto it = pending_tabs_.begin(); it != pending_tabs_.end(); ++it) {
         if (browser_ctx && browser_ctx->IsSame(it->second.context)) {
             TabInfo info = it->second;
-            info.browser = browser;
             info.browser_id = cef_id;
+            info.browser = browser;
 
             tabs_[info.tab_id] = info;
             cef_id_to_tab_id_[cef_id] = info.tab_id;
@@ -115,15 +117,16 @@ void SessionManager::on_browser_created(CefRefPtr<CefBrowser> browser) {
         }
     }
 
-    // Fallback: if no pending tab matched (e.g. browser opened externally),
-    // track it with a synthetic tab id.
+    // Unrecognized context — track with a synthetic tab id
     int tab_id = next_tab_id_++;
     TabInfo info;
     info.tab_id = tab_id;
     info.browser_id = cef_id;
     info.browser = browser;
-    info.context = browser->GetHost()->GetRequestContext();
-    info.in_memory = true;
+    info.context = browser_ctx;
+    // Derive in_memory from whether the context has a cache path set
+    CefString cache_path = browser_ctx ? browser_ctx->GetCachePath() : CefString();
+    info.in_memory = cache_path.empty();
 
     tabs_[tab_id] = info;
     cef_id_to_tab_id_[cef_id] = tab_id;
@@ -137,7 +140,19 @@ void SessionManager::on_browser_closed(CefRefPtr<CefBrowser> browser) {
         return;
     }
 
-    tabs_.erase(it->second);
+    int tab_id = it->second;
+    auto tab_it = tabs_.find(tab_id);
+
+    // Clean up on-disk cache for non-in-memory tabs
+    if (tab_it != tabs_.end() && !tab_it->second.in_memory) {
+        std::string cache_path = root_cache_path_ + "/tab_" + std::to_string(tab_id);
+        std::error_code ec;
+        std::filesystem::remove_all(cache_path, ec);
+    }
+
+    if (tab_it != tabs_.end()) {
+        tabs_.erase(tab_it);
+    }
     cef_id_to_tab_id_.erase(it);
 }
 

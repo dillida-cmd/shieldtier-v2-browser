@@ -21,7 +21,6 @@ struct Ipv4Range {
     uint32_t mask;
 };
 
-// Returns true if the parsed IPv4 address falls within the given CIDR range.
 bool ipv4_in_range(uint32_t addr, const Ipv4Range& range) {
     return (addr & range.mask) == range.network;
 }
@@ -37,29 +36,30 @@ Ipv4Range make_range(const char* base, int prefix_len) {
     return {addr.s_addr & mask, mask};
 }
 
-}  // namespace
-
-bool RequestHandler::is_unsafe_scheme(const std::string& url) {
+bool is_unsafe_scheme(const std::string& url) {
     auto starts_with = [&](const char* prefix) {
         return url.compare(0, strlen(prefix), prefix) == 0;
     };
     return starts_with("javascript:") ||
            starts_with("vbscript:") ||
-           starts_with("data:text/html");
+           starts_with("data:text/html") ||
+           starts_with("data:text/xhtml") ||
+           starts_with("data:image/svg+xml");
 }
 
-bool RequestHandler::is_private_ip(const std::string& host) {
+bool is_private_ipv4(const std::string& host) {
     struct in_addr addr {};
     if (inet_pton(AF_INET, host.c_str(), &addr) != 1) {
         return false;
     }
 
-    // Allow localhost (127.0.0.1) for dev
+#ifndef NDEBUG
     struct in_addr localhost_addr {};
     inet_pton(AF_INET, "127.0.0.1", &localhost_addr);
     if (addr.s_addr == localhost_addr.s_addr) {
         return false;
     }
+#endif
 
     static const Ipv4Range kPrivateRanges[] = {
         make_range("10.0.0.0", 8),
@@ -77,6 +77,69 @@ bool RequestHandler::is_private_ip(const std::string& host) {
     return false;
 }
 
+bool is_private_ipv6(const std::string& host) {
+    struct in6_addr addr {};
+    if (inet_pton(AF_INET6, host.c_str(), &addr) != 1) {
+        return false;
+    }
+
+    uint8_t* b = addr.s6_addr;
+
+    // ::1 (loopback)
+#ifndef NDEBUG
+    // Allow ::1 in debug builds
+#else
+    {
+        struct in6_addr loopback = IN6ADDR_LOOPBACK_INIT;
+        if (memcmp(&addr, &loopback, sizeof(addr)) == 0) {
+            return true;
+        }
+    }
+#endif
+
+    // fc00::/7 (unique local address)
+    if ((b[0] & 0xFE) == 0xFC) {
+        return true;
+    }
+
+    // fe80::/10 (link-local)
+    if (b[0] == 0xFE && (b[1] & 0xC0) == 0x80) {
+        return true;
+    }
+
+    // ::ffff:0:0/96 (IPv4-mapped) — check the mapped IPv4 address
+    bool is_v4_mapped = (b[0] == 0 && b[1] == 0 && b[2] == 0 && b[3] == 0 &&
+                         b[4] == 0 && b[5] == 0 && b[6] == 0 && b[7] == 0 &&
+                         b[8] == 0 && b[9] == 0 && b[10] == 0xFF && b[11] == 0xFF);
+    if (is_v4_mapped) {
+        char v4_str[INET_ADDRSTRLEN];
+        struct in_addr v4_addr {};
+        memcpy(&v4_addr, &b[12], 4);
+        inet_ntop(AF_INET, &v4_addr, v4_str, sizeof(v4_str));
+        return is_private_ipv4(v4_str);
+    }
+
+    return false;
+}
+
+bool is_private_ip(const std::string& host) {
+    return is_private_ipv4(host) || is_private_ipv6(host);
+}
+
+std::string extract_host(const std::string& url) {
+    auto scheme_end = url.find("://");
+    if (scheme_end == std::string::npos) {
+        return {};
+    }
+    auto host_start = scheme_end + 3;
+    auto host_end = url.find_first_of(":/?#", host_start);
+    size_t host_len = (host_end == std::string::npos) ? std::string::npos
+                                                      : host_end - host_start;
+    return url.substr(host_start, host_len);
+}
+
+}  // namespace
+
 bool RequestHandler::OnBeforeBrowse(CefRefPtr<CefBrowser> /*browser*/,
                                     CefRefPtr<CefFrame> /*frame*/,
                                     CefRefPtr<CefRequest> request,
@@ -89,17 +152,7 @@ bool RequestHandler::OnBeforeBrowse(CefRefPtr<CefBrowser> /*browser*/,
         return true;
     }
 
-    // Extract host from URL for private IP check.
-    // CefURICreate/parse isn't exposed simply, so we parse manually.
-    // Expects scheme://host[:port]/... format.
-    std::string host;
-    auto scheme_end = url.find("://");
-    if (scheme_end != std::string::npos) {
-        auto host_start = scheme_end + 3;
-        auto host_end = url.find_first_of(":/?#", host_start);
-        host = url.substr(host_start, host_end - host_start);
-    }
-
+    std::string host = extract_host(url);
     if (!host.empty() && is_private_ip(host)) {
         LOG(WARNING) << "[ShieldTier] Blocked navigation to private IP: " << host;
         return true;
@@ -113,7 +166,6 @@ bool RequestHandler::OnCertificateError(CefRefPtr<CefBrowser> /*browser*/,
                                         const CefString& request_url,
                                         CefRefPtr<CefSSLInfo> /*ssl_info*/,
                                         CefRefPtr<CefCallback> callback) {
-    // SOC malware analysis browser must access sites with bad certs
     LOG(WARNING) << "[ShieldTier] Allowing cert error " << cert_error
                  << " for: " << request_url.ToString();
     callback->Continue();

@@ -40,8 +40,6 @@ public:
         CefRefPtr<CefResponse> response) override;
 
 private:
-    static bool is_unsafe_scheme(const std::string& url);
-    static bool is_private_ip(const std::string& host);
 
     IMPLEMENT_REFCOUNTING(RequestHandler);
     DISALLOW_COPY_AND_ASSIGN(RequestHandler);
