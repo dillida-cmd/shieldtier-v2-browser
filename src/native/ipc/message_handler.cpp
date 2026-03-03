@@ -16,6 +16,12 @@ MessageHandler::MessageHandler(SessionManager* session_manager)
     yara_engine_->initialize();
 }
 
+MessageHandler::~MessageHandler() {
+    // jthread destructor requests stop and joins automatically.
+    std::lock_guard<std::mutex> lock(threads_mutex_);
+    analysis_threads_.clear();
+}
+
 bool MessageHandler::OnQuery(CefRefPtr<CefBrowser> browser,
                              CefRefPtr<CefFrame> /*frame*/,
                              int64_t /*query_id*/,
@@ -100,11 +106,19 @@ json MessageHandler::handle_analyze_download(const json& payload) {
 
     {
         std::lock_guard<std::mutex> lock(results_mutex_);
+        auto it = analysis_results_.find(sha256);
+        if (it != analysis_results_.end()) {
+            std::string status = it->second.value("status", "");
+            if (status == "pending" || status == "complete") {
+                return ipc::make_success({{"queued", false}, {"sha256", sha256},
+                                          {"reason", "already_" + status}});
+            }
+        }
         analysis_results_[sha256] = {{"status", "pending"}};
     }
 
-    // Capture raw pointers/values for the detached thread.
-    // The engine pointers are stable for the lifetime of MessageHandler.
+    // Pointers are stable for the lifetime of MessageHandler.
+    // The jthread is joined in ~MessageHandler before engines are destroyed.
     auto* sm = session_manager_;
     auto* yara = yara_engine_.get();
     auto* fa = file_analyzer_.get();
@@ -113,7 +127,8 @@ json MessageHandler::handle_analyze_download(const json& payload) {
     auto* results_map = &analysis_results_;
     auto* mtx = &results_mutex_;
 
-    std::thread([sha256, sm, yara, fa, em, sc, results_map, mtx]() {
+    std::jthread thread([sha256, sm, yara, fa, em, sc, results_map, mtx]
+                        (std::stop_token stop) {
         auto file_opt = sm->get_captured_download(sha256);
         if (!file_opt.has_value()) {
             std::lock_guard<std::mutex> lock(*mtx);
@@ -127,28 +142,28 @@ json MessageHandler::handle_analyze_download(const json& payload) {
         FileBuffer file = std::move(file_opt.value());
         std::vector<AnalysisEngineResult> engine_results;
 
-        // YARA scan
+        if (stop.stop_requested()) return;
+
         auto yara_result = yara->scan(file);
         if (yara_result.ok()) {
             engine_results.push_back(std::move(yara_result.value()));
         }
 
-        // File analysis
+        if (stop.stop_requested()) return;
+
         auto fa_result = fa->analyze(file);
         if (fa_result.ok()) {
             engine_results.push_back(std::move(fa_result.value()));
         }
 
-        // Compute MD5 for enrichment
-        std::string md5 = FileAnalyzer::compute_md5(file.ptr(), file.size());
+        if (stop.stop_requested()) return;
 
-        // Hash enrichment
+        std::string md5 = FileAnalyzer::compute_md5(file.ptr(), file.size());
         auto enrich_result = em->enrich_by_hash(sha256, md5);
         if (enrich_result.ok()) {
             engine_results.push_back(std::move(enrich_result.value()));
         }
 
-        // Score aggregation
         auto verdict_result = sc->score(engine_results);
 
         json output;
@@ -166,7 +181,12 @@ json MessageHandler::handle_analyze_download(const json& payload) {
 
         std::lock_guard<std::mutex> lock(*mtx);
         (*results_map)[sha256] = std::move(output);
-    }).detach();
+    });
+
+    {
+        std::lock_guard<std::mutex> lock(threads_mutex_);
+        analysis_threads_.push_back(std::move(thread));
+    }
 
     return ipc::make_success({{"queued", true}, {"sha256", sha256}});
 }
@@ -182,7 +202,7 @@ json MessageHandler::handle_get_analysis_result(const json& payload) {
     if (it != analysis_results_.end()) {
         return ipc::make_success(it->second);
     }
-    return ipc::make_success({{"status", "pending"}});
+    return ipc::make_success({{"status", "not_found"}});
 }
 
 }  // namespace shieldtier

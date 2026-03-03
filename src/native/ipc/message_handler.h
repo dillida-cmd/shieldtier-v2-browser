@@ -5,6 +5,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <vector>
 
 #include "include/cef_browser.h"
 #include "include/wrapper/cef_message_router.h"
@@ -21,6 +22,7 @@ namespace shieldtier {
 class MessageHandler : public CefMessageRouterBrowserSide::Handler {
 public:
     explicit MessageHandler(SessionManager* session_manager);
+    ~MessageHandler();
 
     bool OnQuery(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
                  int64_t query_id, const CefString& request, bool persistent,
@@ -45,6 +47,9 @@ private:
     std::unique_ptr<FileAnalyzer> file_analyzer_;
     std::unique_ptr<EnrichmentManager> enrichment_manager_;
     std::unique_ptr<ScoringEngine> scoring_engine_;
+
+    std::vector<std::jthread> analysis_threads_;
+    std::mutex threads_mutex_;
 };
 
 }  // namespace shieldtier
