@@ -138,83 +138,91 @@ int64_t LogNormalizer::parse_timestamp(const std::string& ts) {
 
     // ISO 8601: 2025-03-03T14:22:15Z or 2025-03-03T14:22:15.000Z or with offset
     if (ts.size() >= 19 && ts[4] == '-' && ts[7] == '-' && (ts[10] == 'T' || ts[10] == ' ')) {
-        struct std::tm tm = {};
-        tm.tm_year = std::stoi(ts.substr(0, 4)) - 1900;
-        tm.tm_mon = std::stoi(ts.substr(5, 2)) - 1;
-        tm.tm_mday = std::stoi(ts.substr(8, 2));
-        tm.tm_hour = std::stoi(ts.substr(11, 2));
-        tm.tm_min = std::stoi(ts.substr(14, 2));
-        tm.tm_sec = std::stoi(ts.substr(17, 2));
+        try {
+            struct std::tm tm = {};
+            tm.tm_year = std::stoi(ts.substr(0, 4)) - 1900;
+            tm.tm_mon = std::stoi(ts.substr(5, 2)) - 1;
+            tm.tm_mday = std::stoi(ts.substr(8, 2));
+            tm.tm_hour = std::stoi(ts.substr(11, 2));
+            tm.tm_min = std::stoi(ts.substr(14, 2));
+            tm.tm_sec = std::stoi(ts.substr(17, 2));
 
-        int64_t millis = 0;
-        size_t frac_pos = 19;
-        if (frac_pos < ts.size() && ts[frac_pos] == '.') {
-            ++frac_pos;
-            std::string frac;
-            while (frac_pos < ts.size() && is_digit(ts[frac_pos])) {
-                frac += ts[frac_pos++];
-            }
-            while (frac.size() < 3) frac += '0';
-            try { millis = std::stoll(frac.substr(0, 3)); } catch (...) {}
-        }
-
-        // Handle timezone offset
-        int tz_offset_sec = 0;
-        if (frac_pos < ts.size()) {
-            char tz_char = ts[frac_pos];
-            if (tz_char == '+' || tz_char == '-') {
-                int tz_h = 0, tz_m = 0;
-                if (frac_pos + 5 <= ts.size()) {
-                    tz_h = std::stoi(ts.substr(frac_pos + 1, 2));
-                    // Colon-separated or not
-                    size_t min_start = frac_pos + 3;
-                    if (min_start < ts.size() && ts[min_start] == ':') ++min_start;
-                    if (min_start + 2 <= ts.size()) {
-                        tz_m = std::stoi(ts.substr(min_start, 2));
-                    }
+            int64_t millis = 0;
+            size_t frac_pos = 19;
+            if (frac_pos < ts.size() && ts[frac_pos] == '.') {
+                ++frac_pos;
+                std::string frac;
+                while (frac_pos < ts.size() && is_digit(ts[frac_pos])) {
+                    frac += ts[frac_pos++];
                 }
-                tz_offset_sec = (tz_h * 3600 + tz_m * 60) * (tz_char == '+' ? 1 : -1);
+                while (frac.size() < 3) frac += '0';
+                try { millis = std::stoll(frac.substr(0, 3)); } catch (...) {}
             }
-        }
+
+            // Handle timezone offset
+            int tz_offset_sec = 0;
+            if (frac_pos < ts.size()) {
+                char tz_char = ts[frac_pos];
+                if (tz_char == '+' || tz_char == '-') {
+                    int tz_h = 0, tz_m = 0;
+                    if (frac_pos + 5 <= ts.size()) {
+                        tz_h = std::stoi(ts.substr(frac_pos + 1, 2));
+                        // Colon-separated or not
+                        size_t min_start = frac_pos + 3;
+                        if (min_start < ts.size() && ts[min_start] == ':') ++min_start;
+                        if (min_start + 2 <= ts.size()) {
+                            tz_m = std::stoi(ts.substr(min_start, 2));
+                        }
+                    }
+                    tz_offset_sec = (tz_h * 3600 + tz_m * 60) * (tz_char == '+' ? 1 : -1);
+                }
+            }
 
 #ifdef _WIN32
-        time_t epoch = _mkgmtime(&tm);
+            time_t epoch = _mkgmtime(&tm);
 #else
-        time_t epoch = timegm(&tm);
+            time_t epoch = timegm(&tm);
 #endif
-        if (epoch == -1) return 0;
-        epoch -= tz_offset_sec;
-        return static_cast<int64_t>(epoch) * 1000 + millis;
+            if (epoch == -1) return 0;
+            epoch -= tz_offset_sec;
+            return static_cast<int64_t>(epoch) * 1000 + millis;
+        } catch (...) {
+            return 0;
+        }
     }
 
     // Apache-style: DD/Mon/YYYY:HH:MM:SS +ZONE
     // e.g. 03/Mar/2025:14:22:15 +0000
     if (ts.size() >= 20 && ts[2] == '/' && ts[6] == '/') {
-        struct std::tm tm = {};
-        tm.tm_mday = std::stoi(ts.substr(0, 2));
-        int mon = month_from_abbr(ts.substr(3, 3));
-        if (mon < 0) return 0;
-        tm.tm_mon = mon;
-        tm.tm_year = std::stoi(ts.substr(7, 4)) - 1900;
-        tm.tm_hour = std::stoi(ts.substr(12, 2));
-        tm.tm_min = std::stoi(ts.substr(15, 2));
-        tm.tm_sec = std::stoi(ts.substr(18, 2));
+        try {
+            struct std::tm tm = {};
+            tm.tm_mday = std::stoi(ts.substr(0, 2));
+            int mon = month_from_abbr(ts.substr(3, 3));
+            if (mon < 0) return 0;
+            tm.tm_mon = mon;
+            tm.tm_year = std::stoi(ts.substr(7, 4)) - 1900;
+            tm.tm_hour = std::stoi(ts.substr(12, 2));
+            tm.tm_min = std::stoi(ts.substr(15, 2));
+            tm.tm_sec = std::stoi(ts.substr(18, 2));
 
-        int tz_offset_sec = 0;
-        if (ts.size() >= 24 && (ts[21] == '+' || ts[21] == '-')) {
-            int tz_h = std::stoi(ts.substr(22, 2));
-            int tz_m = std::stoi(ts.substr(24, 2));
-            tz_offset_sec = (tz_h * 3600 + tz_m * 60) * (ts[21] == '+' ? 1 : -1);
-        }
+            int tz_offset_sec = 0;
+            if (ts.size() >= 24 && (ts[21] == '+' || ts[21] == '-')) {
+                int tz_h = std::stoi(ts.substr(22, 2));
+                int tz_m = std::stoi(ts.substr(24, 2));
+                tz_offset_sec = (tz_h * 3600 + tz_m * 60) * (ts[21] == '+' ? 1 : -1);
+            }
 
 #ifdef _WIN32
-        time_t epoch = _mkgmtime(&tm);
+            time_t epoch = _mkgmtime(&tm);
 #else
-        time_t epoch = timegm(&tm);
+            time_t epoch = timegm(&tm);
 #endif
-        if (epoch == -1) return 0;
-        epoch -= tz_offset_sec;
-        return static_cast<int64_t>(epoch) * 1000;
+            if (epoch == -1) return 0;
+            epoch -= tz_offset_sec;
+            return static_cast<int64_t>(epoch) * 1000;
+        } catch (...) {
+            return 0;
+        }
     }
 
     // Syslog-style: Mon DD HH:MM:SS (use current year)
@@ -222,40 +230,44 @@ int64_t LogNormalizer::parse_timestamp(const std::string& ts) {
     if (ts.size() >= 14) {
         int mon = month_from_abbr(ts.substr(0, 3));
         if (mon >= 0) {
-            // Find day: skip spaces after month
-            size_t day_start = 3;
-            while (day_start < ts.size() && ts[day_start] == ' ') ++day_start;
-            size_t day_end = day_start;
-            while (day_end < ts.size() && is_digit(ts[day_end])) ++day_end;
-            if (day_end > day_start && day_end + 1 < ts.size()) {
-                int day = std::stoi(ts.substr(day_start, day_end - day_start));
+            try {
+                // Find day: skip spaces after month
+                size_t day_start = 3;
+                while (day_start < ts.size() && ts[day_start] == ' ') ++day_start;
+                size_t day_end = day_start;
+                while (day_end < ts.size() && is_digit(ts[day_end])) ++day_end;
+                if (day_end > day_start && day_end + 1 < ts.size()) {
+                    int day = std::stoi(ts.substr(day_start, day_end - day_start));
 
-                // Time starts after space
-                size_t time_start = day_end + 1;
-                if (time_start + 8 <= ts.size()) {
-                    struct std::tm tm = {};
-                    auto now = std::chrono::system_clock::now();
-                    auto now_t = std::chrono::system_clock::to_time_t(now);
-                    struct std::tm now_tm;
+                    // Time starts after space
+                    size_t time_start = day_end + 1;
+                    if (time_start + 8 <= ts.size()) {
+                        struct std::tm tm = {};
+                        auto now = std::chrono::system_clock::now();
+                        auto now_t = std::chrono::system_clock::to_time_t(now);
+                        struct std::tm now_tm;
 #ifdef _WIN32
-                    gmtime_s(&now_tm, &now_t);
+                        gmtime_s(&now_tm, &now_t);
 #else
-                    gmtime_r(&now_t, &now_tm);
+                        gmtime_r(&now_t, &now_tm);
 #endif
-                    tm.tm_year = now_tm.tm_year;
-                    tm.tm_mon = mon;
-                    tm.tm_mday = day;
-                    tm.tm_hour = std::stoi(ts.substr(time_start, 2));
-                    tm.tm_min = std::stoi(ts.substr(time_start + 3, 2));
-                    tm.tm_sec = std::stoi(ts.substr(time_start + 6, 2));
+                        tm.tm_year = now_tm.tm_year;
+                        tm.tm_mon = mon;
+                        tm.tm_mday = day;
+                        tm.tm_hour = std::stoi(ts.substr(time_start, 2));
+                        tm.tm_min = std::stoi(ts.substr(time_start + 3, 2));
+                        tm.tm_sec = std::stoi(ts.substr(time_start + 6, 2));
 
 #ifdef _WIN32
-                    time_t epoch = _mkgmtime(&tm);
+                        time_t epoch = _mkgmtime(&tm);
 #else
-                    time_t epoch = timegm(&tm);
+                        time_t epoch = timegm(&tm);
 #endif
-                    if (epoch != -1) return static_cast<int64_t>(epoch) * 1000;
+                        if (epoch != -1) return static_cast<int64_t>(epoch) * 1000;
+                    }
                 }
+            } catch (...) {
+                return 0;
             }
         }
     }

@@ -180,6 +180,21 @@ bool looks_like_apache(const std::string& line) {
     return has_dot;
 }
 
+LogFormat format_from_extension(const std::string& filename) {
+    auto dot = filename.rfind('.');
+    if (dot == std::string::npos) return LogFormat::kAuto;
+    std::string ext = filename.substr(dot);
+    std::transform(ext.begin(), ext.end(), ext.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+    if (ext == ".csv" || ext == ".tsv") return LogFormat::kCsv;
+    if (ext == ".json" || ext == ".jsonl" || ext == ".ndjson") return LogFormat::kJson;
+    if (ext == ".evtx") return LogFormat::kEvtx;
+    if (ext == ".pcap" || ext == ".pcapng") return LogFormat::kPcap;
+    if (ext == ".eml" || ext == ".msg") return LogFormat::kEml;
+    if (ext == ".xlsx" || ext == ".xls") return LogFormat::kXlsx;
+    return LogFormat::kAuto;
+}
+
 }  // namespace
 
 LogManager::LogManager() = default;
@@ -894,7 +909,14 @@ std::vector<NormalizedEvent> LogManager::parse_apache(const std::string& content
 Result<AnalysisEngineResult> LogManager::analyze(const FileBuffer& file) {
     auto start = std::chrono::steady_clock::now();
 
-    auto parse_result = parse(file.ptr(), file.size());
+    // Tier 2: Try extension-based format detection before content sampling
+    LogFormat hint = format_from_extension(file.filename);
+    LogFormat resolved = hint;
+    if (resolved == LogFormat::kAuto) {
+        resolved = detect_format(file.ptr(), file.size());
+    }
+
+    auto parse_result = parse(file.ptr(), file.size(), resolved);
     if (!parse_result.ok()) {
         AnalysisEngineResult result;
         result.engine = AnalysisEngine::kLogAnalysis;
@@ -926,7 +948,7 @@ Result<AnalysisEngineResult> LogManager::analyze(const FileBuffer& file) {
     result.raw_output = {
         {"event_count", events.size()},
         {"filename", file.filename},
-        {"format_detected", static_cast<int>(detect_format(file.ptr(), file.size()))},
+        {"format_detected", static_cast<int>(resolved)},
     };
 
     return result;

@@ -82,6 +82,18 @@ bool is_internal_ip(const std::string& ip) {
     return false;
 }
 
+bool contains_word(const std::string& haystack, const std::string& word) {
+    size_t pos = 0;
+    while ((pos = haystack.find(word, pos)) != std::string::npos) {
+        bool left_ok = (pos == 0 || !std::isalnum(static_cast<unsigned char>(haystack[pos - 1])));
+        bool right_ok = (pos + word.size() >= haystack.size() ||
+                         !std::isalnum(static_cast<unsigned char>(haystack[pos + word.size()])));
+        if (left_ok && right_ok) return true;
+        pos += word.size();
+    }
+    return false;
+}
+
 std::string truncate(const std::string& s, size_t max_len) {
     if (s.size() <= max_len) return s;
     return s.substr(0, max_len) + "...";
@@ -150,7 +162,7 @@ std::vector<Finding> LogDetector::detect_brute_force(
                                 : 0;
         int64_t window_sec = window_ms / 1000;
 
-        if (attempts.count >= 20) {
+        if (attempts.count >= 20 && window_sec <= 3600) {
             findings.push_back({
                 "Log Detection: Password Spray Detected",
                 "Source IP " + ip + " generated " + std::to_string(attempts.count) +
@@ -236,11 +248,11 @@ std::vector<Finding> LogDetector::detect_privilege_escalation(
         const char* pattern2;  // nullptr = single-pattern match
     } priv_patterns[] = {
         {"added to admin", nullptr},
-        {"added to Administrators", nullptr},
+        {"added to administrators", nullptr},
         {"group membership changed", nullptr},
-        {"SeDebugPrivilege", nullptr},
-        {"SeTcbPrivilege", nullptr},
-        {"SeImpersonatePrivilege", nullptr},
+        {"sedebugprivilege", nullptr},
+        {"setcbprivilege", nullptr},
+        {"seimpersonateprivilege", nullptr},
     };
 
     // Dual-pattern matches (both must be present)
@@ -254,10 +266,10 @@ std::vector<Finding> LogDetector::detect_privilege_escalation(
     };
 
     for (const auto& event : events) {
-        const std::string& msg = event.message;
+        std::string lower_msg = to_lower(event.message);
 
         for (const auto& pat : priv_patterns) {
-            if (msg.find(pat.pattern1) != std::string::npos) {
+            if (lower_msg.find(pat.pattern1) != std::string::npos) {
                 std::string user = json_string(event.fields, "_user");
                 findings.push_back({
                     "Log Detection: Privilege Escalation Indicator",
@@ -274,8 +286,8 @@ std::vector<Finding> LogDetector::detect_privilege_escalation(
         }
 
         for (const auto& dp : dual_patterns) {
-            if (msg.find(dp.a) != std::string::npos &&
-                msg.find(dp.b) != std::string::npos) {
+            if (lower_msg.find(dp.a) != std::string::npos &&
+                lower_msg.find(dp.b) != std::string::npos) {
                 std::string user = json_string(event.fields, "_user");
                 findings.push_back({
                     "Log Detection: Privilege Escalation Indicator",
@@ -445,7 +457,7 @@ std::vector<Finding> LogDetector::detect_suspicious_commands(
 
         // Event log clearing
         if (lower_cmd.find("wevtutil") != std::string::npos &&
-            lower_cmd.find("cl") != std::string::npos) {
+            contains_word(lower_cmd, "cl")) {
             findings.push_back({
                 "Log Detection: Event Log Clearing",
                 "Windows event logs being cleared — critical indicator of anti-forensics",
@@ -474,7 +486,7 @@ std::vector<Finding> LogDetector::detect_suspicious_commands(
         }
 
         // Service creation
-        if (lower_cmd.find("sc") != std::string::npos &&
+        if (contains_word(lower_cmd, "sc") &&
             lower_cmd.find("create") != std::string::npos &&
             lower_cmd.find("binpath") != std::string::npos) {
             findings.push_back({
@@ -490,7 +502,7 @@ std::vector<Finding> LogDetector::detect_suspicious_commands(
         }
 
         // Registry run key modification
-        if (lower_cmd.find("reg") != std::string::npos &&
+        if (contains_word(lower_cmd, "reg") &&
             lower_cmd.find("add") != std::string::npos &&
             lower_cmd.find("run") != std::string::npos) {
             findings.push_back({
