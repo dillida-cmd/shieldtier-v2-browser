@@ -6,6 +6,7 @@ set(SHIELDTIER_SOURCES
     app/shieldtier_client.cpp
     browser/download_handler.cpp
     browser/request_handler.cpp
+    browser/response_filter.cpp
 )
 
 add_executable(shieldtier ${SHIELDTIER_SOURCES})
