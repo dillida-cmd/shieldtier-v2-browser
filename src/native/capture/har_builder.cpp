@@ -75,6 +75,7 @@ json HarBuilder::build_headers(
 }
 
 std::string HarBuilder::format_timestamp(int64_t epoch_ms) const {
+    if (epoch_ms < 0) epoch_ms = 0;
     auto seconds = static_cast<time_t>(epoch_ms / 1000);
     int millis = static_cast<int>(epoch_ms % 1000);
 

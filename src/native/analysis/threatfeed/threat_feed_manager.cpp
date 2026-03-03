@@ -8,6 +8,13 @@
 namespace shieldtier {
 namespace {
 
+std::string to_lower(const std::string& s) {
+    std::string out = s;
+    std::transform(out.begin(), out.end(), out.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+    return out;
+}
+
 constexpr size_t kMaxIndicatorsPerFeed = 10000;
 
 std::string extract_host_from_url(const std::string& url) {
@@ -23,10 +30,12 @@ std::string extract_host_from_url(const std::string& url) {
 
 bool looks_like_ip(const std::string& host) {
     if (host.empty()) return false;
+    int dots = 0;
     for (char c : host) {
-        if (c != '.' && (c < '0' || c > '9')) return false;
+        if (c == '.') { ++dots; }
+        else if (c < '0' || c > '9') return false;
     }
-    return true;
+    return dots == 3;
 }
 
 }  // namespace
@@ -195,7 +204,7 @@ void ThreatFeedManager::index_indicators(
         } else if (ti.type == "domain") {
             domain_set_.insert(ti.value);
         } else if (ti.type == "hash") {
-            hash_set_.insert(ti.value);
+            hash_set_.insert(to_lower(ti.value));
         } else if (ti.type == "url") {
             url_set_.insert(ti.value);
         }
@@ -209,7 +218,7 @@ bool ThreatFeedManager::is_known_threat(const std::string& type,
 
     if (type == "ip") return ip_set_.count(value) > 0;
     if (type == "domain") return domain_set_.count(value) > 0;
-    if (type == "hash") return hash_set_.count(value) > 0;
+    if (type == "hash") return hash_set_.count(to_lower(value)) > 0;
     if (type == "url") return url_set_.count(value) > 0;
 
     return false;

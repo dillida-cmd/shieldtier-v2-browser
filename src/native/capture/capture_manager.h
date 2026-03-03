@@ -15,11 +15,11 @@ struct CapturedRequest {
     std::string url;
     std::unordered_map<std::string, std::string> request_headers;
     std::unordered_map<std::string, std::string> response_headers;
-    int status_code;
-    int64_t request_size;
-    int64_t response_size;
-    double duration_ms;
-    int64_t timestamp;
+    int status_code = 0;
+    int64_t request_size = 0;
+    int64_t response_size = 0;
+    double duration_ms = 0.0;
+    int64_t timestamp = 0;
     std::string mime_type;
 };
 
