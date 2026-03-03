@@ -1,0 +1,40 @@
+#pragma once
+
+#include <memory>
+#include <mutex>
+#include <string>
+#include <vector>
+
+#include <yara.h>
+
+#include "analysis/yara/rule_manager.h"
+#include "common/result.h"
+#include "common/types.h"
+
+namespace shieldtier {
+
+class YaraEngine {
+public:
+    YaraEngine();
+    ~YaraEngine();
+
+    YaraEngine(const YaraEngine&) = delete;
+    YaraEngine& operator=(const YaraEngine&) = delete;
+
+    Result<bool> initialize();
+    Result<bool> compile_rules();
+    Result<AnalysisEngineResult> scan(const FileBuffer& file);
+
+    RuleManager& rule_manager() { return rule_manager_; }
+
+private:
+    static int scan_callback(YR_SCAN_CONTEXT* context, int message,
+                             void* message_data, void* user_data);
+
+    RuleManager rule_manager_;
+    YR_RULES* compiled_rules_ = nullptr;
+    std::mutex compile_mutex_;
+    bool initialized_ = false;
+};
+
+}  // namespace shieldtier
