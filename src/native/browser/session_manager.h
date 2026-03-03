@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -7,6 +8,8 @@
 #include "include/cef_browser.h"
 #include "include/cef_client.h"
 #include "include/cef_request_context.h"
+
+#include "common/types.h"
 
 namespace shieldtier {
 
@@ -28,6 +31,10 @@ public:
     CefRefPtr<CefBrowser> get_browser(int browser_id);
     std::vector<TabInfo> get_all_tabs() const;
     void clear_tab_data(int browser_id);
+
+    // Retrieve a captured download by SHA-256 hash.
+    // Stub: will be wired to the response filter capture store in Task 6.
+    std::optional<FileBuffer> get_captured_download(const std::string& sha256);
 
     void on_browser_created(CefRefPtr<CefBrowser> browser);
     void on_browser_closed(CefRefPtr<CefBrowser> browser);

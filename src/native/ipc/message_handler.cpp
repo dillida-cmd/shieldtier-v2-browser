@@ -1,11 +1,20 @@
 #include "ipc/message_handler.h"
 
+#include <thread>
+
+#include "analysis/fileanalysis/file_analyzer.h"
 #include "browser/navigation.h"
 
 namespace shieldtier {
 
 MessageHandler::MessageHandler(SessionManager* session_manager)
-    : session_manager_(session_manager) {}
+    : session_manager_(session_manager),
+      yara_engine_(std::make_unique<YaraEngine>()),
+      file_analyzer_(std::make_unique<FileAnalyzer>()),
+      enrichment_manager_(std::make_unique<EnrichmentManager>(EnrichmentConfig{})),
+      scoring_engine_(std::make_unique<ScoringEngine>()) {
+    yara_engine_->initialize();
+}
 
 bool MessageHandler::OnQuery(CefRefPtr<CefBrowser> browser,
                              CefRefPtr<CefFrame> /*frame*/,
@@ -88,7 +97,77 @@ json MessageHandler::handle_analyze_download(const json& payload) {
     if (sha256.empty()) {
         return ipc::make_error("sha256_required");
     }
-    analysis_results_[sha256] = {{"status", "pending"}};
+
+    {
+        std::lock_guard<std::mutex> lock(results_mutex_);
+        analysis_results_[sha256] = {{"status", "pending"}};
+    }
+
+    // Capture raw pointers/values for the detached thread.
+    // The engine pointers are stable for the lifetime of MessageHandler.
+    auto* sm = session_manager_;
+    auto* yara = yara_engine_.get();
+    auto* fa = file_analyzer_.get();
+    auto* em = enrichment_manager_.get();
+    auto* sc = scoring_engine_.get();
+    auto* results_map = &analysis_results_;
+    auto* mtx = &results_mutex_;
+
+    std::thread([sha256, sm, yara, fa, em, sc, results_map, mtx]() {
+        auto file_opt = sm->get_captured_download(sha256);
+        if (!file_opt.has_value()) {
+            std::lock_guard<std::mutex> lock(*mtx);
+            (*results_map)[sha256] = {
+                {"status", "error"},
+                {"error", "download_not_found"}
+            };
+            return;
+        }
+
+        FileBuffer file = std::move(file_opt.value());
+        std::vector<AnalysisEngineResult> engine_results;
+
+        // YARA scan
+        auto yara_result = yara->scan(file);
+        if (yara_result.ok()) {
+            engine_results.push_back(std::move(yara_result.value()));
+        }
+
+        // File analysis
+        auto fa_result = fa->analyze(file);
+        if (fa_result.ok()) {
+            engine_results.push_back(std::move(fa_result.value()));
+        }
+
+        // Compute MD5 for enrichment
+        std::string md5 = FileAnalyzer::compute_md5(file.ptr(), file.size());
+
+        // Hash enrichment
+        auto enrich_result = em->enrich_by_hash(sha256, md5);
+        if (enrich_result.ok()) {
+            engine_results.push_back(std::move(enrich_result.value()));
+        }
+
+        // Score aggregation
+        auto verdict_result = sc->score(engine_results);
+
+        json output;
+        if (verdict_result.ok()) {
+            output = {
+                {"status", "complete"},
+                {"verdict", verdict_result.value()}
+            };
+        } else {
+            output = {
+                {"status", "error"},
+                {"error", verdict_result.error().message}
+            };
+        }
+
+        std::lock_guard<std::mutex> lock(*mtx);
+        (*results_map)[sha256] = std::move(output);
+    }).detach();
+
     return ipc::make_success({{"queued", true}, {"sha256", sha256}});
 }
 
@@ -97,6 +176,8 @@ json MessageHandler::handle_get_analysis_result(const json& payload) {
     if (sha256.empty()) {
         return ipc::make_error("sha256_required");
     }
+
+    std::lock_guard<std::mutex> lock(results_mutex_);
     auto it = analysis_results_.find(sha256);
     if (it != analysis_results_.end()) {
         return ipc::make_success(it->second);

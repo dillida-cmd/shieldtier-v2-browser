@@ -1,6 +1,7 @@
 #include "browser/session_manager.h"
 
 #include <filesystem>
+#include <optional>
 
 #include "include/cef_cookie.h"
 #include "include/cef_request_context_handler.h"
@@ -76,6 +77,12 @@ std::vector<SessionManager::TabInfo> SessionManager::get_all_tabs() const {
         result.push_back(info);
     }
     return result;
+}
+
+std::optional<FileBuffer> SessionManager::get_captured_download(
+    const std::string& /*sha256*/) {
+    // Stub — will be wired to the response filter capture store in Task 6.
+    return std::nullopt;
 }
 
 void SessionManager::clear_tab_data(int browser_id) {

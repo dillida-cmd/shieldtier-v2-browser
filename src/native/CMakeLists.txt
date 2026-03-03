@@ -11,6 +11,13 @@ set(SHIELDTIER_SOURCES
     browser/session_manager.cpp
     browser/navigation.cpp
     ipc/message_handler.cpp
+    analysis/yara/yara_engine.cpp
+    analysis/yara/rule_manager.cpp
+    analysis/fileanalysis/file_analyzer.cpp
+    analysis/fileanalysis/pe_analyzer.cpp
+    analysis/enrichment/enrichment_manager.cpp
+    analysis/enrichment/http_client.cpp
+    scoring/scoring_engine.cpp
 )
 
 add_executable(shieldtier ${SHIELDTIER_SOURCES})
@@ -25,6 +32,9 @@ target_link_libraries(shieldtier PRIVATE
     libcef_dll_wrapper
     ${CEF_LIBRARY}
     nlohmann_json::nlohmann_json
+    yara
+    pe-parse
+    CURL::libcurl
 )
 
 # ---------------------------------------------------------------------------
