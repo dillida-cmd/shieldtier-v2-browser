@@ -62,6 +62,8 @@ std::string parse_dns_name(const uint8_t* buf, size_t len, size_t offset) {
     while (offset < len) {
         uint8_t label_len = buf[offset];
         if (label_len == 0) break;
+        // Handle compression pointers (top 2 bits set)
+        if ((label_len & 0xC0) == 0xC0) break;
         if (offset + 1 + label_len > len) break;
         if (!name.empty()) name += '.';
         name.append(reinterpret_cast<const char*>(buf + offset + 1), label_len);
@@ -252,6 +254,8 @@ void INetSimServer::clear_events() {
 
 void INetSimServer::record_event(const NetworkEvent& event) {
     std::lock_guard<std::mutex> lock(events_mutex_);
+    constexpr size_t kMaxEvents = 100000;
+    if (events_.size() >= kMaxEvents) return;
     events_.push_back(event);
 }
 
@@ -295,8 +299,12 @@ void INetSimServer::dns_server_loop() {
         // Determine query type from bytes after the question name
         std::string query_type = "A";
         size_t qname_end = 12;
-        while (qname_end < recv_len && buf[qname_end] != 0) {
-            qname_end += 1 + buf[qname_end];
+        while (qname_end < recv_len) {
+            uint8_t lbl = buf[qname_end];
+            if (lbl == 0) break;
+            if ((lbl & 0xC0) == 0xC0) { qname_end += 2; break; }
+            if (qname_end + 1 + lbl > recv_len) break;
+            qname_end += 1 + lbl;
         }
         if (qname_end + 3 < recv_len) {
             uint16_t qtype = (static_cast<uint16_t>(buf[qname_end + 1]) << 8) |

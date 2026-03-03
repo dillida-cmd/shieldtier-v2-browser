@@ -31,6 +31,9 @@ private:
     std::string generate_bios_vendor() const;
 
     AntiEvasionConfig config_;
+    std::string selected_manufacturer_;
+    std::string selected_product_;
+    std::string selected_oui_;
 };
 
 }  // namespace shieldtier

@@ -1,5 +1,6 @@
 #include "vm/anti_evasion.h"
 
+#include <cassert>
 #include <random>
 #include <sstream>
 
@@ -8,8 +9,7 @@ namespace shieldtier {
 namespace {
 
 std::mt19937& rng() {
-    static std::random_device rd;
-    static std::mt19937 gen(rd());
+    static thread_local std::mt19937 gen(std::random_device{}());
     return gen;
 }
 
@@ -37,13 +37,17 @@ std::string random_alnum(int length) {
 }
 
 std::string random_guid() {
+    static constexpr char variant_chars[] = "89AB";
+    std::uniform_int_distribution<int> var_dist(0, 3);
     return random_hex(8) + "-" + random_hex(4) + "-" +
            "4" + random_hex(3) + "-" +
-           random_hex(4) + "-" + random_hex(12);
+           std::string(1, variant_chars[var_dist(rng())]) + random_hex(3) + "-" +
+           random_hex(12);
 }
 
 template <typename T>
 const T& random_choice(const std::vector<T>& items) {
+    assert(!items.empty());
     std::uniform_int_distribution<size_t> dist(0, items.size() - 1);
     return items[dist(rng())];
 }
@@ -124,7 +128,12 @@ const std::vector<std::string>& fake_bash_history() {
 
 }  // namespace
 
-AntiEvasion::AntiEvasion(const AntiEvasionConfig& config) : config_(config) {}
+AntiEvasion::AntiEvasion(const AntiEvasionConfig& config) : config_(config) {
+    const auto& vendor = random_choice(vendor_table());
+    selected_manufacturer_ = vendor.manufacturer;
+    selected_product_ = vendor.product;
+    selected_oui_ = vendor.oui;
+}
 
 std::vector<std::string> AntiEvasion::get_qemu_args() const {
     std::vector<std::string> args;
@@ -140,11 +149,10 @@ std::vector<std::string> AntiEvasion::get_qemu_args() const {
     }
 
     if (config_.randomize_serial) {
-        const auto& vendor = random_choice(vendor_table());
         args.push_back("-smbios");
         args.push_back("type=1,serial=" + generate_serial() +
-                       ",manufacturer=" + vendor.manufacturer +
-                       ",product=" + vendor.product);
+                       ",manufacturer=" + selected_manufacturer_ +
+                       ",product=" + selected_product_);
     }
 
     if (config_.realistic_disk_size) {
@@ -174,24 +182,23 @@ json AntiEvasion::get_guest_patches(const std::string& platform) const {
         }
 
         if (config_.randomize_serial) {
-            const auto& vendor = random_choice(vendor_table());
             registry_patches.push_back({
                 {"path", "HKLM\\SYSTEM\\CurrentControlSet\\Services\\Disk\\Enum\\0"},
                 {"name", "0"},
                 {"type", "REG_SZ"},
-                {"value", "IDE\\Disk" + vendor.manufacturer + "_" + generate_serial() + "\\1"}
+                {"value", "IDE\\Disk" + selected_manufacturer_ + "_" + generate_serial() + "\\1"}
             });
             registry_patches.push_back({
                 {"path", "HKLM\\HARDWARE\\DESCRIPTION\\System\\BIOS"},
                 {"name", "SystemManufacturer"},
                 {"type", "REG_SZ"},
-                {"value", vendor.manufacturer}
+                {"value", selected_manufacturer_}
             });
             registry_patches.push_back({
                 {"path", "HKLM\\HARDWARE\\DESCRIPTION\\System\\BIOS"},
                 {"name", "SystemProductName"},
                 {"type", "REG_SZ"},
-                {"value", vendor.product}
+                {"value", selected_product_}
             });
         }
 
@@ -213,7 +220,6 @@ json AntiEvasion::get_guest_patches(const std::string& platform) const {
         }
 
     } else if (platform == "linux") {
-        const auto& vendor = random_choice(vendor_table());
         std::string hostname = "ws-" + random_alnum(6);
 
         json filesystem_patches = json::array();
@@ -233,11 +239,11 @@ json AntiEvasion::get_guest_patches(const std::string& platform) const {
 
         filesystem_patches.push_back({
             {"path", "/sys/class/dmi/id/sys_vendor"},
-            {"content", vendor.manufacturer}
+            {"content", selected_manufacturer_}
         });
         filesystem_patches.push_back({
             {"path", "/sys/class/dmi/id/product_name"},
-            {"content", vendor.product}
+            {"content", selected_product_}
         });
 
         patches["filesystem_patches"] = filesystem_patches;
@@ -253,8 +259,7 @@ std::string AntiEvasion::generate_serial() const {
 }
 
 std::string AntiEvasion::generate_mac() const {
-    const auto& vendor = random_choice(vendor_table());
-    std::string mac = vendor.oui;
+    std::string mac = selected_oui_;
     for (int i = 0; i < 3; ++i) {
         mac += ":" + random_hex(2);
     }
