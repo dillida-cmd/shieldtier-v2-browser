@@ -17,6 +17,8 @@ set(SHIELDTIER_SOURCES
     analysis/fileanalysis/pe_analyzer.cpp
     analysis/enrichment/enrichment_manager.cpp
     analysis/enrichment/http_client.cpp
+    analysis/email/email_analyzer.cpp
+    analysis/content/content_analyzer.cpp
     scoring/scoring_engine.cpp
     export/defang.cpp
     export/export_manager.cpp
