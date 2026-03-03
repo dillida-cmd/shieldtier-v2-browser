@@ -2,6 +2,7 @@
 
 #include "include/cef_request_handler.h"
 #include "include/cef_resource_request_handler.h"
+#include "include/wrapper/cef_message_router.h"
 
 namespace shieldtier {
 
@@ -9,6 +10,10 @@ class RequestHandler : public CefRequestHandler,
                        public CefResourceRequestHandler {
 public:
     RequestHandler() = default;
+
+    void set_message_router(CefRefPtr<CefMessageRouterBrowserSide> router) {
+        message_router_ = router;
+    }
 
     // CefRequestHandler
     bool OnBeforeBrowse(CefRefPtr<CefBrowser> browser,
@@ -22,6 +27,9 @@ public:
                             const CefString& request_url,
                             CefRefPtr<CefSSLInfo> ssl_info,
                             CefRefPtr<CefCallback> callback) override;
+
+    void OnRenderProcessTerminated(CefRefPtr<CefBrowser> browser,
+                                    TerminationStatus status) override;
 
     CefRefPtr<CefResourceRequestHandler> GetResourceRequestHandler(
         CefRefPtr<CefBrowser> browser,
@@ -40,6 +48,7 @@ public:
         CefRefPtr<CefResponse> response) override;
 
 private:
+    CefRefPtr<CefMessageRouterBrowserSide> message_router_;
 
     IMPLEMENT_REFCOUNTING(RequestHandler);
     DISALLOW_COPY_AND_ASSIGN(RequestHandler);

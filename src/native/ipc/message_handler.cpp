@@ -49,6 +49,14 @@ void MessageHandler::OnQueryCanceled(CefRefPtr<CefBrowser> /*browser*/,
 json MessageHandler::handle_navigate(CefRefPtr<CefBrowser> browser,
                                      const json& payload) {
     std::string url = payload.value("url", "");
+    if (url.empty()) {
+        return ipc::make_error("url_required");
+    }
+    if (url.compare(0, 7, "http://") != 0 &&
+        url.compare(0, 8, "https://") != 0 &&
+        url != "about:blank") {
+        return ipc::make_error("invalid_url_scheme");
+    }
     Navigation::load_url(browser, url);
     return ipc::make_success();
 }
@@ -68,18 +76,27 @@ json MessageHandler::handle_get_tabs(const json& /*payload*/) {
 
 json MessageHandler::handle_close_tab(const json& payload) {
     int browser_id = payload.value("browser_id", -1);
+    if (browser_id < 0) {
+        return ipc::make_error("browser_id_required");
+    }
     session_manager_->close_tab(browser_id);
     return ipc::make_success();
 }
 
 json MessageHandler::handle_analyze_download(const json& payload) {
     std::string sha256 = payload.value("sha256", "");
+    if (sha256.empty()) {
+        return ipc::make_error("sha256_required");
+    }
     analysis_results_[sha256] = {{"status", "pending"}};
     return ipc::make_success({{"queued", true}, {"sha256", sha256}});
 }
 
 json MessageHandler::handle_get_analysis_result(const json& payload) {
     std::string sha256 = payload.value("sha256", "");
+    if (sha256.empty()) {
+        return ipc::make_error("sha256_required");
+    }
     auto it = analysis_results_.find(sha256);
     if (it != analysis_results_.end()) {
         return ipc::make_success(it->second);

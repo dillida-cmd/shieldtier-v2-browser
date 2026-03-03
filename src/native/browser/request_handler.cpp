@@ -140,8 +140,8 @@ std::string extract_host(const std::string& url) {
 
 }  // namespace
 
-bool RequestHandler::OnBeforeBrowse(CefRefPtr<CefBrowser> /*browser*/,
-                                    CefRefPtr<CefFrame> /*frame*/,
+bool RequestHandler::OnBeforeBrowse(CefRefPtr<CefBrowser> browser,
+                                    CefRefPtr<CefFrame> frame,
                                     CefRefPtr<CefRequest> request,
                                     bool /*user_gesture*/,
                                     bool /*is_redirect*/) {
@@ -158,6 +158,9 @@ bool RequestHandler::OnBeforeBrowse(CefRefPtr<CefBrowser> /*browser*/,
         return true;
     }
 
+    if (message_router_) {
+        message_router_->OnBeforeBrowse(browser, frame);
+    }
     return false;
 }
 
@@ -170,6 +173,14 @@ bool RequestHandler::OnCertificateError(CefRefPtr<CefBrowser> /*browser*/,
                  << " for: " << request_url.ToString();
     callback->Continue();
     return true;
+}
+
+void RequestHandler::OnRenderProcessTerminated(
+        CefRefPtr<CefBrowser> browser,
+        TerminationStatus /*status*/) {
+    if (message_router_) {
+        message_router_->OnRenderProcessTerminated(browser);
+    }
 }
 
 CefRefPtr<CefResourceRequestHandler> RequestHandler::GetResourceRequestHandler(

@@ -23,5 +23,5 @@ bool ShieldTierRendererApp::OnProcessMessageReceived(
         CefProcessId source_process,
         CefRefPtr<CefProcessMessage> message) {
     return message_router_->OnProcessMessageReceived(
-        browser, source_process, message);
+        browser, frame, source_process, message);
 }

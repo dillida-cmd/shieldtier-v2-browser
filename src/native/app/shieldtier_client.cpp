@@ -12,10 +12,10 @@ ShieldTierClient::ShieldTierClient(const std::string& root_cache_path)
     message_handler_ = std::make_unique<shieldtier::MessageHandler>(
         session_manager_.get());
     message_router_->AddHandler(message_handler_.get(), false);
+    request_handler_->set_message_router(message_router_);
 }
 
 void ShieldTierClient::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
-    message_router_->OnAfterCreated(browser);
     browser_ = browser;
     browser_count_++;
     session_manager_->on_browser_created(browser);
@@ -49,5 +49,5 @@ bool ShieldTierClient::OnProcessMessageReceived(
         CefProcessId source_process,
         CefRefPtr<CefProcessMessage> message) {
     return message_router_->OnProcessMessageReceived(
-        browser, source_process, message);
+        browser, frame, source_process, message);
 }
