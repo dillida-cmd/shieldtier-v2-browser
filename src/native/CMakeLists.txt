@@ -30,6 +30,8 @@ set(SHIELDTIER_SOURCES
     export/export_manager.cpp
     vm/vm_manager.cpp
     vm/qemu_launcher.cpp
+    vm/inetsim_server.cpp
+    vm/anti_evasion.cpp
 )
 
 add_executable(shieldtier ${SHIELDTIER_SOURCES})
