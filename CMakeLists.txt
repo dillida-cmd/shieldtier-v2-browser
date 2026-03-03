@@ -42,7 +42,13 @@ set(BUILD_TESTS OFF CACHE INTERNAL "")
 add_subdirectory(third_party/pe-parse)
 
 set(BUILD_SHARED_LIBS OFF CACHE INTERNAL "")
-set(CURL_USE_OPENSSL OFF CACHE INTERNAL "")
+if(OS_MACOS)
+    set(CURL_USE_SECTRANSPORT ON CACHE INTERNAL "")
+elseif(OS_WINDOWS)
+    set(CURL_USE_SCHANNEL ON CACHE INTERNAL "")
+else()
+    set(CURL_USE_OPENSSL ON CACHE INTERNAL "")
+endif()
 set(BUILD_CURL_EXE OFF CACHE INTERNAL "")
 set(BUILD_TESTING OFF CACHE INTERNAL "")
 add_subdirectory(third_party/curl)
@@ -89,7 +95,7 @@ add_dependencies(yara yara_ext)
 
 ExternalProject_Add(libsodium_ext
     SOURCE_DIR "${CMAKE_SOURCE_DIR}/third_party/libsodium"
-    CONFIGURE_COMMAND sh -c "cd <SOURCE_DIR> && ./configure --prefix=<INSTALL_DIR> --disable-shared --enable-static"
+    CONFIGURE_COMMAND sh -c "cd <SOURCE_DIR> && ./autogen.sh && ./configure --prefix=<INSTALL_DIR> --disable-shared --enable-static"
     BUILD_COMMAND make -j${NPROC}
     INSTALL_COMMAND make install
     BUILD_IN_SOURCE TRUE

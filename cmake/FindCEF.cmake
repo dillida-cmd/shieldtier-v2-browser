@@ -61,12 +61,29 @@ elseif(OS_WINDOWS)
 endif()
 
 # ---------------------------------------------------------------------------
+# Validate that the platform library actually exists
+# ---------------------------------------------------------------------------
+if(OS_MACOS)
+    if(EXISTS "${CEF_FRAMEWORK_DIR}")
+        set(CEF_LIBRARY_FOUND TRUE)
+    endif()
+elseif(OS_LINUX)
+    if(EXISTS "${CEF_ROOT}/Release/libcef.so")
+        set(CEF_LIBRARY_FOUND TRUE)
+    endif()
+elseif(OS_WINDOWS)
+    if(EXISTS "${CEF_ROOT}/Release/libcef.lib")
+        set(CEF_LIBRARY_FOUND TRUE)
+    endif()
+endif()
+
+# ---------------------------------------------------------------------------
 # Resource directories
 # ---------------------------------------------------------------------------
 set(CEF_RESOURCES_DIR "${CEF_ROOT}/Resources")
 set(CEF_LOCALES_DIR "${CEF_ROOT}/Resources/locales")
 
 find_package_handle_standard_args(CEF
-    REQUIRED_VARS CEF_ROOT CEF_INCLUDE_DIRS
-    FAIL_MESSAGE "CEF SDK not found. Run scripts/bootstrap.sh to download it."
+    REQUIRED_VARS CEF_ROOT CEF_INCLUDE_DIRS CEF_LIBRARY_FOUND
+    FAIL_MESSAGE "CEF SDK not found or incomplete. Run scripts/bootstrap.sh"
 )
