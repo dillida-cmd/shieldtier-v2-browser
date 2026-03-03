@@ -2,9 +2,16 @@
 
 #include "include/cef_app.h"
 
+ShieldTierClient::ShieldTierClient(const std::string& root_cache_path)
+    : request_handler_(new shieldtier::RequestHandler()),
+      download_handler_(new shieldtier::DownloadHandler()),
+      session_manager_(std::make_unique<shieldtier::SessionManager>(
+          root_cache_path)) {}
+
 void ShieldTierClient::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
     browser_ = browser;
     browser_count_++;
+    session_manager_->on_browser_created(browser);
 }
 
 bool ShieldTierClient::DoClose(CefRefPtr<CefBrowser> /*browser*/) {
@@ -12,6 +19,8 @@ bool ShieldTierClient::DoClose(CefRefPtr<CefBrowser> /*browser*/) {
 }
 
 void ShieldTierClient::OnBeforeClose(CefRefPtr<CefBrowser> browser) {
+    session_manager_->on_browser_closed(browser);
+
     if (browser_ && browser_->IsSame(browser)) {
         browser_ = nullptr;
     }

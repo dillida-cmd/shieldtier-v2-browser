@@ -5,16 +5,10 @@
 #include "include/cef_command_line.h"
 
 void ShieldTierApp::OnContextInitialized() {
-    CefWindowInfo window_info;
+    const std::string root_cache_path = "/tmp/shieldtier/cache";
 
-#if defined(OS_WIN)
-    window_info.SetAsPopup(nullptr, "ShieldTier");
-#endif
+    CefRefPtr<ShieldTierClient> client(
+        new ShieldTierClient(root_cache_path));
 
-    CefBrowserSettings browser_settings;
-
-    CefRefPtr<ShieldTierClient> client(new ShieldTierClient());
-
-    CefBrowserHost::CreateBrowser(window_info, client, "about:blank",
-                                  browser_settings, nullptr, nullptr);
+    client->session_manager()->create_tab("about:blank", true, client);
 }
