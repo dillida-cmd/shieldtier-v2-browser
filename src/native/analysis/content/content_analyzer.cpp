@@ -109,19 +109,6 @@ const std::regex& hidden_iframe_regex() {
     return re;
 }
 
-const std::regex& form_password_regex() {
-    static const std::regex re(
-        R"(<form[^>]+action\s*=\s*"(https?://[^"]+)"[\s\S]{0,2000}?<input[^>]+type\s*=\s*"password")",
-        std::regex::icase);
-    return re;
-}
-
-const std::regex& base64_in_script_regex() {
-    static const std::regex re(
-        R"(<script[^>]*>[\s\S]*?[A-Za-z0-9+/]{500,}={0,2}[\s\S]*?</script>)",
-        std::regex::icase);
-    return re;
-}
 
 const std::regex& crypto_miner_regex() {
     static const std::regex re(
@@ -340,12 +327,14 @@ std::vector<Finding> ContentAnalyzer::analyze_html(const std::string& content) {
 
     // External scripts
     std::smatch ext_script_match;
-    std::string search_content = content;
     int external_script_count = 0;
-    while (std::regex_search(search_content, ext_script_match, external_script_regex()) &&
-           external_script_count < 50) {
-        ++external_script_count;
-        search_content = ext_script_match.suffix().str();
+    {
+        auto it = content.cbegin();
+        while (std::regex_search(it, content.cend(), ext_script_match, external_script_regex()) &&
+               external_script_count < 50) {
+            ++external_script_count;
+            it = ext_script_match.suffix().first;
+        }
     }
     if (external_script_count > 0) {
         findings.push_back({
@@ -372,14 +361,37 @@ std::vector<Finding> ContentAnalyzer::analyze_html(const std::string& content) {
     }
 
     // Large base64 payload inside <script> tags
-    if (std::regex_search(content, base64_in_script_regex())) {
-        findings.push_back({
-            "Content: Large Base64 Payload in Script",
-            "Script tag contains a base64-encoded payload exceeding 500 characters — likely embedded binary or obfuscated code",
-            Severity::kHigh,
-            AnalysisEngine::kContent,
-            {{"mitre_technique", "T1027"}},
-        });
+    {
+        size_t script_pos = 0;
+        std::string lower_content = content;
+        std::transform(lower_content.begin(), lower_content.end(), lower_content.begin(),
+                       [](unsigned char c) { return std::tolower(c); });
+        while ((script_pos = lower_content.find("<script", script_pos)) != std::string::npos) {
+            size_t script_end = lower_content.find("</script>", script_pos);
+            if (script_end == std::string::npos) break;
+            std::string script_body = content.substr(script_pos, script_end - script_pos);
+            size_t run = 0;
+            for (char c : script_body) {
+                if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                    (c >= '0' && c <= '9') || c == '+' || c == '/' || c == '=') {
+                    ++run;
+                    if (run >= 500) {
+                        findings.push_back({
+                            "Content: Large Base64 Payload in Script",
+                            "Script tag contains a base64-encoded payload (500+ characters)",
+                            Severity::kHigh,
+                            AnalysisEngine::kContent,
+                            {{"mitre_technique", "T1027"}},
+                        });
+                        break;
+                    }
+                } else {
+                    run = 0;
+                }
+            }
+            if (run >= 500) break;
+            script_pos = script_end + 9;
+        }
     }
 
     // Drive-by download triggers
@@ -394,17 +406,46 @@ std::vector<Finding> ContentAnalyzer::analyze_html(const std::string& content) {
     }
 
     // Hidden divs containing scripts
-    static const std::regex hidden_div_script_re(
-        R"(<div[^>]+(?:display\s*:\s*none|visibility\s*:\s*hidden)[^>]*>[\s\S]{0,2000}?<script)",
-        std::regex::icase);
-    if (std::regex_search(content, hidden_div_script_re)) {
-        findings.push_back({
-            "Content: Hidden Div with Embedded Script",
-            "Hidden HTML element contains a script tag — possible hidden malicious payload",
-            Severity::kHigh,
-            AnalysisEngine::kContent,
-            {{"mitre_technique", "T1027"}},
-        });
+    {
+        std::string lower_html = content;
+        std::transform(lower_html.begin(), lower_html.end(), lower_html.begin(),
+                       [](unsigned char c) { return std::tolower(c); });
+        size_t div_pos = 0;
+        while ((div_pos = lower_html.find("<div", div_pos)) != std::string::npos) {
+            size_t tag_end = lower_html.find(">", div_pos);
+            if (tag_end == std::string::npos) break;
+            std::string tag = lower_html.substr(div_pos, tag_end - div_pos + 1);
+            if (tag.find("display") != std::string::npos &&
+                tag.find("none") != std::string::npos) {
+                size_t block_end = std::min(tag_end + 2001, lower_html.size());
+                std::string block = lower_html.substr(tag_end, block_end - tag_end);
+                if (block.find("<script") != std::string::npos) {
+                    findings.push_back({
+                        "Content: Hidden Div with Embedded Script",
+                        "Hidden HTML element contains a script tag — possible hidden malicious payload",
+                        Severity::kHigh,
+                        AnalysisEngine::kContent,
+                        {{"mitre_technique", "T1027"}},
+                    });
+                    break;
+                }
+            } else if (tag.find("visibility") != std::string::npos &&
+                       tag.find("hidden") != std::string::npos) {
+                size_t block_end = std::min(tag_end + 2001, lower_html.size());
+                std::string block = lower_html.substr(tag_end, block_end - tag_end);
+                if (block.find("<script") != std::string::npos) {
+                    findings.push_back({
+                        "Content: Hidden Div with Embedded Script",
+                        "Hidden HTML element contains a script tag — possible hidden malicious payload",
+                        Severity::kHigh,
+                        AnalysisEngine::kContent,
+                        {{"mitre_technique", "T1027"}},
+                    });
+                    break;
+                }
+            }
+            div_pos += 4;
+        }
     }
 
     return findings;
@@ -504,7 +545,23 @@ std::vector<Finding> ContentAnalyzer::analyze_javascript(const std::string& cont
 }
 
 bool ContentAnalyzer::detect_phishing_form(const std::string& html) {
-    return std::regex_search(html, form_password_regex());
+    std::string lower = html;
+    std::transform(lower.begin(), lower.end(), lower.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+    size_t pos = 0;
+    while ((pos = lower.find("<form", pos)) != std::string::npos) {
+        size_t form_end = lower.find("</form>", pos);
+        if (form_end == std::string::npos) form_end = std::min(pos + 4000, lower.size());
+        std::string form_block = lower.substr(pos, form_end - pos);
+        if (form_block.find("action=") != std::string::npos &&
+            form_block.find("type=\"password\"") != std::string::npos &&
+            (form_block.find("http://") != std::string::npos ||
+             form_block.find("https://") != std::string::npos)) {
+            return true;
+        }
+        pos += 5;
+    }
+    return false;
 }
 
 bool ContentAnalyzer::detect_drive_by_download(const std::string& html) {
@@ -512,19 +569,18 @@ bool ContentAnalyzer::detect_drive_by_download(const std::string& html) {
 
     // Hidden iframe with download-related src
     if (std::regex_search(html, hidden_iframe_regex())) {
-        // Check if any iframe src contains download-suggestive patterns
         static const std::regex iframe_src_re(
             R"(<iframe[^>]+src\s*=\s*"([^"]+)")", std::regex::icase);
         std::smatch m;
-        std::string search = html;
-        while (std::regex_search(search, m, iframe_src_re)) {
+        auto it = html.cbegin();
+        while (std::regex_search(it, html.cend(), m, iframe_src_re)) {
             std::string src = to_lower(m[1].str());
             if (src.find(".exe") != std::string::npos ||
                 src.find(".msi") != std::string::npos ||
                 src.find("download") != std::string::npos) {
                 return true;
             }
-            search = m.suffix().str();
+            it = m.suffix().first;
         }
     }
 

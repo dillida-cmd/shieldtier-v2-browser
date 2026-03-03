@@ -47,7 +47,7 @@ private:
     std::vector<std::string> extract_urls(const std::string& text);
 
     void parse_mime_part(const std::string& part, const std::string& boundary,
-                         ParsedEmail& result);
+                         ParsedEmail& result, int depth = 0);
 };
 
 }  // namespace shieldtier

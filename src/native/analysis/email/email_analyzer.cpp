@@ -14,6 +14,8 @@ namespace {
 
 constexpr size_t kMaxEmailSize = 25 * 1024 * 1024;
 constexpr size_t kMaxUrls = 500;
+constexpr size_t kMaxAttachmentSize = 50 * 1024 * 1024;
+constexpr size_t kMaxAttachmentCount = 100;
 
 // Simple SHA-256 -- standalone implementation to avoid adding dependencies.
 // Based on the FIPS 180-4 specification.
@@ -247,13 +249,28 @@ std::string extract_boundary(const std::string& content_type) {
 
 // Extract a specific parameter from a header value
 std::string extract_param(const std::string& header_val, const std::string& param) {
-    std::string pattern = param + R"(\s*=\s*"?([^";\s]+)"?)";
-    std::regex re(pattern, std::regex::icase);
-    std::smatch match;
-    if (std::regex_search(header_val, match, re)) {
-        return match[1].str();
+    std::string lower_val = to_lower(header_val);
+    std::string lower_param = to_lower(param);
+    auto pos = lower_val.find(lower_param);
+    if (pos == std::string::npos) return "";
+    pos += lower_param.size();
+    while (pos < lower_val.size() && lower_val[pos] == ' ') ++pos;
+    if (pos >= lower_val.size() || lower_val[pos] != '=') return "";
+    ++pos;
+    while (pos < lower_val.size() && lower_val[pos] == ' ') ++pos;
+    if (pos >= lower_val.size()) return "";
+    size_t val_start = pos;
+    if (header_val[pos] == '"') {
+        ++val_start;
+        size_t end = header_val.find('"', val_start);
+        if (end == std::string::npos) return header_val.substr(val_start);
+        return header_val.substr(val_start, end - val_start);
+    } else {
+        size_t end = val_start;
+        while (end < header_val.size() && header_val[end] != ';' &&
+               header_val[end] != ' ' && header_val[end] != '\t') ++end;
+        return header_val.substr(val_start, end - val_start);
     }
-    return "";
 }
 
 // Pre-compiled URL extraction regexes
@@ -276,20 +293,6 @@ const std::unordered_set<std::string>& url_shorteners() {
     return s;
 }
 
-// URL wrapper services (SafeLinks, Proofpoint, etc.)
-const std::vector<std::string>& url_wrapper_patterns() {
-    static const std::vector<std::string> patterns = {
-        "safelinks.protection.outlook.com",
-        "urldefense.proofpoint.com",
-        "urldefense.com",
-        "click.pstmrk.it",
-        "mandrillapp.com/track/click",
-        "sendgrid.net/wf/click",
-        "list-manage.com/track/click",
-        "links.mkt.com",
-    };
-    return patterns;
-}
 
 // Phishing urgency keywords
 const std::vector<std::string>& phishing_keywords() {
@@ -318,6 +321,7 @@ const std::unordered_set<std::string>& dangerous_extensions() {
     static const std::unordered_set<std::string> ext = {
         ".exe", ".scr", ".bat", ".cmd", ".vbs", ".js", ".ps1",
         ".hta", ".lnk", ".msi", ".dll", ".com", ".wsf",
+        ".iso", ".img", ".vhd", ".vhdx",
     };
     return ext;
 }
@@ -503,11 +507,11 @@ Result<ParsedEmail> EmailAnalyzer::parse(const uint8_t* data, size_t size) {
     auto text_urls = extract_urls(result.body_text);
     auto html_urls = extract_urls(result.body_html);
     std::unordered_set<std::string> seen;
-    for (auto& u : text_urls) {
-        if (seen.insert(u).second) result.urls_in_body.push_back(std::move(u));
+    for (const auto& u : text_urls) {
+        if (seen.insert(u).second) result.urls_in_body.push_back(u);
     }
-    for (auto& u : html_urls) {
-        if (seen.insert(u).second) result.urls_in_body.push_back(std::move(u));
+    for (const auto& u : html_urls) {
+        if (seen.insert(u).second) result.urls_in_body.push_back(u);
     }
 
     return result;
@@ -515,7 +519,10 @@ Result<ParsedEmail> EmailAnalyzer::parse(const uint8_t* data, size_t size) {
 
 void EmailAnalyzer::parse_mime_part(const std::string& part,
                                      const std::string& boundary,
-                                     ParsedEmail& result) {
+                                     ParsedEmail& result, int depth) {
+    constexpr int kMaxMimeDepth = 10;
+    if (depth > kMaxMimeDepth) return;
+
     std::string delimiter = "--" + boundary;
     std::string end_delimiter = delimiter + "--";
 
@@ -616,7 +623,7 @@ void EmailAnalyzer::parse_mime_part(const std::string& part,
         // Handle nested multipart
         std::string nested_boundary = extract_boundary(ct);
         if (!nested_boundary.empty()) {
-            parse_mime_part(part_body, nested_boundary, result);
+            parse_mime_part(part_body, nested_boundary, result, depth + 1);
             continue;
         }
 
@@ -643,6 +650,8 @@ void EmailAnalyzer::parse_mime_part(const std::string& part,
         }
 
         if (is_attachment || (!filename.empty() && ct_lower.find("text/") == std::string::npos)) {
+            if (result.attachments.size() >= kMaxAttachmentCount) continue;
+            if (decoded_bytes.size() > kMaxAttachmentSize) continue;
             EmailAttachment att;
             att.filename = filename;
             att.content_type = trim(ct);
@@ -659,6 +668,8 @@ void EmailAnalyzer::parse_mime_part(const std::string& part,
             }
         } else {
             // Non-text, non-attachment binary part -- treat as attachment
+            if (result.attachments.size() >= kMaxAttachmentCount) continue;
+            if (decoded_bytes.size() > kMaxAttachmentSize) continue;
             EmailAttachment att;
             att.filename = filename.empty() ? "unnamed" : filename;
             att.content_type = trim(ct);
@@ -800,7 +811,8 @@ std::vector<Finding> EmailAnalyzer::analyze_headers(const ParsedEmail& email) {
                     from_domain + ")",
                 Severity::kLow,
                 AnalysisEngine::kEmail,
-                {{"from_domain", from_domain}, {"return_path_domain", rp_domain}},
+                {{"from_domain", from_domain}, {"return_path_domain", rp_domain},
+                 {"mitre_technique", "T1566.001"}},
             });
         }
     }
@@ -851,10 +863,13 @@ std::vector<Finding> EmailAnalyzer::analyze_headers(const ParsedEmail& email) {
         };
 
         auto to_seconds = [](const SimpleDate& d) -> int64_t {
-            // Rough seconds since epoch for comparison only
-            return int64_t(d.year) * 31536000LL + int64_t(d.month) * 2592000LL +
-                   int64_t(d.day) * 86400LL + int64_t(d.hour) * 3600LL +
-                   int64_t(d.min) * 60LL + int64_t(d.sec);
+            static constexpr int days_before_month[] = {
+                0, 0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334
+            };
+            int m = (d.month >= 1 && d.month <= 12) ? d.month : 1;
+            int64_t days = int64_t(d.year) * 365 + (d.year / 4) +
+                           days_before_month[m] + d.day;
+            return days * 86400LL + d.hour * 3600LL + d.min * 60LL + d.sec;
         };
 
         // Received headers: index 0 = most recent hop, last = origin
@@ -935,23 +950,6 @@ std::vector<Finding> EmailAnalyzer::analyze_body(const ParsedEmail& email) {
         }
     }
 
-    // URL wrapper services (SafeLinks, Proofpoint, etc.)
-    for (const auto& url : email.urls_in_body) {
-        std::string url_lower = to_lower(url);
-        for (const auto& wrapper : url_wrapper_patterns()) {
-            if (url_lower.find(wrapper) != std::string::npos) {
-                // Wrapped URLs are generally benign (security gateways), but note it
-                findings.push_back({
-                    "Email: Wrapped URL Detected",
-                    "URL is wrapped through a rewriting service (" + wrapper + ")",
-                    Severity::kInfo,
-                    AnalysisEngine::kEmail,
-                    {{"url", url.substr(0, 200)}, {"wrapper_service", wrapper}},
-                });
-                break;
-            }
-        }
-    }
 
     // Homograph detection: URLs with non-ASCII characters (simple check)
     for (const auto& url : email.urls_in_body) {
