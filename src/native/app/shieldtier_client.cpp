@@ -11,7 +11,10 @@ bool ShieldTierClient::DoClose(CefRefPtr<CefBrowser> /*browser*/) {
     return false;
 }
 
-void ShieldTierClient::OnBeforeClose(CefRefPtr<CefBrowser> /*browser*/) {
+void ShieldTierClient::OnBeforeClose(CefRefPtr<CefBrowser> browser) {
+    if (browser_ && browser_->IsSame(browser)) {
+        browser_ = nullptr;
+    }
     browser_count_--;
     if (browser_count_ <= 0) {
         CefQuitMessageLoop();

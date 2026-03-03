@@ -16,7 +16,7 @@ target_include_directories(shieldtier PRIVATE
 
 target_link_libraries(shieldtier PRIVATE
     libcef_dll_wrapper
-    CEF_LIBRARY
+    ${CEF_LIBRARY}
     nlohmann_json::nlohmann_json
 )
 

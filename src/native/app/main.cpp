@@ -38,7 +38,9 @@ int main(int argc, char* argv[]) {
 
     CefRefPtr<ShieldTierApp> app(new ShieldTierApp());
 
-    CefInitialize(main_args, settings, app.get(), nullptr);
+    if (!CefInitialize(main_args, settings, app.get(), nullptr)) {
+        return 1;
+    }
     CefRunMessageLoop();
     CefShutdown();
 

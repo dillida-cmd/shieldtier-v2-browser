@@ -9,10 +9,7 @@ void ShieldTierApp::OnContextInitialized() {
 
 #if defined(OS_WIN)
     window_info.SetAsPopup(nullptr, "ShieldTier");
-#elif defined(OS_LINUX)
-    window_info.SetAsChild(0, CefRect(0, 0, 1280, 720));
 #endif
-    // macOS: default-constructed CefWindowInfo creates an NSView-backed window
 
     CefBrowserSettings browser_settings;
 
