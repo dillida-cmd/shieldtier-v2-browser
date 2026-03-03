@@ -23,7 +23,7 @@ target_link_libraries(shieldtier PRIVATE
 # ---------------------------------------------------------------------------
 # macOS bundle
 # ---------------------------------------------------------------------------
-if(OS_MACOS)
+if(OS_MACOS OR OS_MAC)
     set_target_properties(shieldtier PROPERTIES
         MACOSX_BUNDLE TRUE
         MACOSX_BUNDLE_GUI_IDENTIFIER "com.shieldtier.browser"

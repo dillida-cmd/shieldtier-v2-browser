@@ -52,12 +52,15 @@ ensure_build_tools() {
     local os
     os="$(uname -s)"
 
+    local build_tools=(cmake ninja)
+    local autotools=(autoconf automake libtool pkg-config)
+
     case "$os" in
         Darwin)
             if ! command -v brew &>/dev/null; then
                 err "Homebrew not found — install from https://brew.sh"; exit 1
             fi
-            for tool in cmake ninja; do
+            for tool in "${build_tools[@]}" "${autotools[@]}"; do
                 if ! command -v "$tool" &>/dev/null; then
                     log "Installing $tool via Homebrew..."
                     brew install "$tool"
@@ -66,16 +69,16 @@ ensure_build_tools() {
             done
             ;;
         Linux)
-            for tool in cmake ninja; do
+            for tool in "${build_tools[@]}" "${autotools[@]}"; do
                 if ! command -v "$tool" &>/dev/null; then
-                    err "$tool not found — install via your distro's package manager (e.g. apt-get install ${tool})"
+                    err "$tool not found — install via your distro's package manager"
                     exit 1
                 fi
                 ok "$tool $(command -v "$tool")"
             done
             ;;
         MINGW*|MSYS*|CYGWIN*)
-            for tool in cmake ninja; do
+            for tool in "${build_tools[@]}"; do
                 if ! command -v "$tool" &>/dev/null; then
                     err "$tool not found — install manually on Windows"; exit 1
                 fi
