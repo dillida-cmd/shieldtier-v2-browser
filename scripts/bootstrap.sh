@@ -10,7 +10,6 @@ CEF_VERSION_URL="145.0.27%2Bg4ddda2e%2Bchromium-145.0.7632.117"
 
 log()  { printf "\033[1;34m==>\033[0m %s\n" "$1"; }
 ok()   { printf "\033[1;32m  ✓\033[0m %s\n" "$1"; }
-warn() { printf "\033[1;33m  !\033[0m %s\n" "$1"; }
 err()  { printf "\033[1;31m  ✗\033[0m %s\n" "$1" >&2; }
 
 # ---------------------------------------------------------------------------
@@ -69,11 +68,8 @@ ensure_build_tools() {
         Linux)
             for tool in cmake ninja; do
                 if ! command -v "$tool" &>/dev/null; then
-                    local pkg="$tool"
-                    [[ "$tool" == "ninja" ]] && pkg="ninja-build"
-                    log "Installing $pkg via apt-get..."
-                    sudo apt-get update -qq
-                    sudo apt-get install -y -qq "$pkg"
+                    err "$tool not found — install via your distro's package manager (e.g. apt-get install ${tool})"
+                    exit 1
                 fi
                 ok "$tool $(command -v "$tool")"
             done
@@ -102,14 +98,13 @@ fetch_cef() {
     fi
 
     log "Downloading CEF $CEF_VERSION for $platform..."
-    mkdir -p "$cef_dir"
 
     local dist_name="cef_binary_${CEF_VERSION_URL}_${platform}_minimal"
     local url="https://cef-builds.spotifycdn.com/${dist_name}.tar.bz2"
     local archive="$THIRD_PARTY/${dist_name}.tar.bz2"
 
     if [[ ! -f "$archive" ]]; then
-        curl -L --fail --progress-bar -o "$archive" "$url"
+        curl -L --fail --retry 3 --retry-delay 5 --progress-bar -o "$archive" "$url"
     fi
 
     log "Extracting CEF SDK..."
@@ -117,10 +112,8 @@ fetch_cef() {
 
     # The archive extracts to a directory with + signs (not URL-encoded)
     local extracted_name="cef_binary_${CEF_VERSION}_${platform}_minimal"
-    if [[ -d "$THIRD_PARTY/$extracted_name" ]]; then
-        mv "$THIRD_PARTY/$extracted_name"/* "$cef_dir"/
-        rmdir "$THIRD_PARTY/$extracted_name"
-    fi
+    rm -rf "$cef_dir"
+    mv "$THIRD_PARTY/$extracted_name" "$cef_dir"
 
     rm -f "$archive"
     ok "CEF SDK extracted to $cef_dir"
