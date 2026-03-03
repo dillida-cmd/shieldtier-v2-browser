@@ -3,6 +3,7 @@
 #include <filesystem>
 
 #include "include/cef_cookie.h"
+#include "include/cef_request_context_handler.h"
 
 namespace shieldtier {
 
