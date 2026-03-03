@@ -16,6 +16,8 @@ ShieldTierClient::ShieldTierClient(const std::string& root_cache_path)
     event_bridge_ = std::make_unique<shieldtier::EventBridge>();
     message_handler_->set_event_bridge(event_bridge_.get());
     request_handler_->set_event_bridge(event_bridge_.get());
+    request_handler_->set_session_manager(session_manager_.get());
+    request_handler_->set_message_handler(message_handler_.get());
 }
 
 void ShieldTierClient::OnAfterCreated(CefRefPtr<CefBrowser> browser) {

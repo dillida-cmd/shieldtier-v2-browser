@@ -2,6 +2,7 @@
 
 #include <optional>
 #include <string>
+#include <mutex>
 #include <unordered_map>
 #include <vector>
 
@@ -32,9 +33,12 @@ public:
     std::vector<TabInfo> get_all_tabs() const;
     void clear_tab_data(int browser_id);
 
-    // Retrieve a captured download by SHA-256 hash.
-    // Stub: will be wired to the response filter capture store in Task 6.
     std::optional<FileBuffer> get_captured_download(const std::string& sha256);
+
+    void store_captured_file(const std::string& sha256,
+                             std::vector<uint8_t>&& data,
+                             const std::string& filename,
+                             const std::string& mime_type);
 
     void on_browser_created(CefRefPtr<CefBrowser> browser);
     void on_browser_closed(CefRefPtr<CefBrowser> browser);
@@ -48,6 +52,9 @@ private:
     // Pending tabs waiting for CEF to assign a browser ID.
     // Keyed by our internal tab_id since we don't have the CEF ID yet.
     std::unordered_map<int, TabInfo> pending_tabs_;
+
+    std::unordered_map<std::string, FileBuffer> captured_files_;
+    std::mutex captured_mutex_;
 };
 
 }  // namespace shieldtier

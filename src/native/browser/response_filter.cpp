@@ -190,8 +190,9 @@ struct DownloadCaptureFilter::HasherImpl {
 // ---------------------------------------------------------------------------
 
 DownloadCaptureFilter::DownloadCaptureFilter(const std::string& url,
-                                             const std::string& mime_type)
-    : url_(url), mime_type_(mime_type) {}
+                                             const std::string& mime_type,
+                                             FilterCompleteCallback on_complete)
+    : url_(url), mime_type_(mime_type), on_complete_(std::move(on_complete)) {}
 
 bool DownloadCaptureFilter::InitFilter() {
     hasher_ = std::make_unique<HasherImpl>();
@@ -208,6 +209,10 @@ CefResponseFilter::FilterStatus DownloadCaptureFilter::Filter(
         data_out_written = 0;
         sha256_hex_ = hasher_->hasher.finalize();
         complete_ = true;
+        if (on_complete_) {
+            on_complete_(sha256_hex_, std::move(buffer_), url_, mime_type_);
+            on_complete_ = nullptr;
+        }
         return RESPONSE_FILTER_DONE;
     }
 

@@ -80,9 +80,25 @@ std::vector<SessionManager::TabInfo> SessionManager::get_all_tabs() const {
 }
 
 std::optional<FileBuffer> SessionManager::get_captured_download(
-    const std::string& /*sha256*/) {
-    // Stub — will be wired to the response filter capture store in Task 6.
-    return std::nullopt;
+        const std::string& sha256) {
+    std::lock_guard<std::mutex> lock(captured_mutex_);
+    auto it = captured_files_.find(sha256);
+    if (it == captured_files_.end()) return std::nullopt;
+    return it->second;
+}
+
+void SessionManager::store_captured_file(const std::string& sha256,
+                                          std::vector<uint8_t>&& data,
+                                          const std::string& filename,
+                                          const std::string& mime_type) {
+    FileBuffer fb;
+    fb.data = std::move(data);
+    fb.filename = filename;
+    fb.mime_type = mime_type;
+    fb.sha256 = sha256;
+
+    std::lock_guard<std::mutex> lock(captured_mutex_);
+    captured_files_[sha256] = std::move(fb);
 }
 
 void SessionManager::clear_tab_data(int browser_id) {

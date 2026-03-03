@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <functional>
 #include <vector>
 
 #include "include/cef_request.h"
@@ -13,6 +14,10 @@ namespace shieldtier {
 
 constexpr size_t kMaxCaptureSize = 500 * 1024 * 1024;
 
+using FilterCompleteCallback = std::function<void(
+    std::string sha256, std::vector<uint8_t> data,
+    std::string url, std::string mime_type)>;
+
 bool is_download_response(CefRefPtr<CefRequest> request,
                           CefRefPtr<CefResponse> response);
 
@@ -22,7 +27,8 @@ bool should_accumulate(CefRefPtr<CefResponse> response);
 // Computes SHA-256 incrementally while passing all bytes through unchanged.
 class DownloadCaptureFilter : public CefResponseFilter {
 public:
-    DownloadCaptureFilter(const std::string& url, const std::string& mime_type);
+    DownloadCaptureFilter(const std::string& url, const std::string& mime_type,
+                          FilterCompleteCallback on_complete = nullptr);
 
     bool InitFilter() override;
     FilterStatus Filter(void* data_in, size_t data_in_size,
@@ -43,6 +49,7 @@ private:
     std::string sha256_hex_;
     bool complete_ = false;
     bool overflow_ = false;
+    FilterCompleteCallback on_complete_;
 
     struct HasherImpl;
     std::unique_ptr<HasherImpl> hasher_;

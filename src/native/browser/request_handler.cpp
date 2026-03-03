@@ -12,6 +12,10 @@
 
 #include "include/base/cef_logging.h"
 
+#include "browser/response_filter.h"
+#include "browser/session_manager.h"
+#include "ipc/message_handler.h"
+
 namespace shieldtier {
 
 namespace {
@@ -197,10 +201,49 @@ CefRefPtr<CefResourceRequestHandler> RequestHandler::GetResourceRequestHandler(
 CefRefPtr<CefResponseFilter> RequestHandler::GetResourceResponseFilter(
     CefRefPtr<CefBrowser> /*browser*/,
     CefRefPtr<CefFrame> /*frame*/,
-    CefRefPtr<CefRequest> /*request*/,
-    CefRefPtr<CefResponse> /*response*/) {
-    // Task 2 builds response filters, Task 6 wires them here
-    return nullptr;
+    CefRefPtr<CefRequest> request,
+    CefRefPtr<CefResponse> response) {
+
+    if (!is_download_response(request, response)) {
+        return nullptr;
+    }
+
+    std::string url = request->GetURL().ToString();
+    std::string mime = response->GetMimeType().ToString();
+
+    if (!should_accumulate(response)) {
+        return new StreamingHashFilter(url, mime);
+    }
+
+    auto* sm = session_manager_;
+    auto* mh = message_handler_;
+    auto* bridge = event_bridge_;
+
+    FilterCompleteCallback on_complete = [sm, mh, bridge](
+        std::string sha256, std::vector<uint8_t> data,
+        std::string file_url, std::string mime_type) {
+        auto last_slash = file_url.rfind('/');
+        std::string filename = last_slash != std::string::npos
+            ? file_url.substr(last_slash + 1) : "download";
+        auto qpos = filename.find('?');
+        if (qpos != std::string::npos) filename = filename.substr(0, qpos);
+
+        size_t file_size = data.size();
+
+        if (sm) {
+            sm->store_captured_file(sha256, std::move(data), filename, mime_type);
+        }
+
+        if (bridge) {
+            bridge->push_download_detected(sha256, filename, file_size);
+        }
+
+        if (mh) {
+            mh->auto_analyze(sha256);
+        }
+    };
+
+    return new DownloadCaptureFilter(url, mime, std::move(on_complete));
 }
 
 }  // namespace shieldtier
