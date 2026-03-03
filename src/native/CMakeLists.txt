@@ -10,6 +10,7 @@ set(SHIELDTIER_SOURCES
     browser/download_handler.cpp
     browser/session_manager.cpp
     browser/navigation.cpp
+    browser/scheme_handler.cpp
     ipc/message_handler.cpp
     config/config_store.cpp
     auth/auth_manager.cpp

@@ -13,6 +13,9 @@ public:
 
     void OnContextInitialized() override;
 
+    void OnRegisterCustomSchemes(
+        CefRawPtr<CefSchemeRegistrar> registrar) override;
+
 private:
     IMPLEMENT_REFCOUNTING(ShieldTierApp);
     DISALLOW_COPY_AND_ASSIGN(ShieldTierApp);
