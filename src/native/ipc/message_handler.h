@@ -10,6 +10,8 @@
 #include "include/cef_browser.h"
 #include "include/wrapper/cef_message_router.h"
 
+#include "ipc/event_bridge.h"
+
 #include "analysis/yara/yara_engine.h"
 #include "analysis/fileanalysis/file_analyzer.h"
 #include "analysis/enrichment/enrichment_manager.h"
@@ -42,6 +44,9 @@ public:
                          CefRefPtr<CefFrame> frame,
                          int64_t query_id) override;
 
+    void set_event_bridge(EventBridge* bridge) { event_bridge_ = bridge; }
+    void auto_analyze(const std::string& sha256);
+
 private:
     json handle_navigate(CefRefPtr<CefBrowser> browser, const json& payload);
     json handle_get_tabs(const json& payload);
@@ -57,6 +62,7 @@ private:
     json handle_get_capture(const json& payload);
 
     SessionManager* session_manager_;
+    EventBridge* event_bridge_ = nullptr;
     std::unordered_map<std::string, json> analysis_results_;
     std::mutex results_mutex_;
 

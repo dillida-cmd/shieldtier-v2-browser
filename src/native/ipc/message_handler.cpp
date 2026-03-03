@@ -378,4 +378,98 @@ json MessageHandler::handle_get_capture(const json& payload) {
     });
 }
 
+void MessageHandler::auto_analyze(const std::string& sha256) {
+    {
+        std::lock_guard<std::mutex> lock(results_mutex_);
+        auto it = analysis_results_.find(sha256);
+        if (it != analysis_results_.end()) {
+            std::string status = it->second.value("status", "");
+            if (status == "pending" || status == "complete") return;
+        }
+        analysis_results_[sha256] = {{"status", "pending"}};
+    }
+
+    auto* sm = session_manager_;
+    auto* yara = yara_engine_.get();
+    auto* fa = file_analyzer_.get();
+    auto* em = enrichment_manager_.get();
+    auto* sc = scoring_engine_.get();
+    auto* sandbox = sandbox_engine_.get();
+    auto* advanced = advanced_engine_.get();
+    auto* email = email_analyzer_.get();
+    auto* content = content_analyzer_.get();
+    auto* log_mgr = log_manager_.get();
+    auto* results_map = &analysis_results_;
+    auto* mtx = &results_mutex_;
+    auto* bridge = event_bridge_;
+
+    std::jthread thread([sha256, sm, yara, fa, em, sc, sandbox, advanced,
+                         email, content, log_mgr, results_map, mtx, bridge]
+                        (std::stop_token stop) {
+        auto file_opt = sm->get_captured_download(sha256);
+        if (!file_opt.has_value()) {
+            json err = {{"status", "error"}, {"error", "download_not_found"}};
+            std::lock_guard<std::mutex> lock(*mtx);
+            (*results_map)[sha256] = err;
+            if (bridge) bridge->push_analysis_complete(sha256, err);
+            return;
+        }
+
+        FileBuffer file = std::move(file_opt.value());
+        std::vector<AnalysisEngineResult> engine_results;
+
+        if (stop.stop_requested()) return;
+        auto yr = yara->scan(file);
+        if (yr.ok()) engine_results.push_back(std::move(yr.value()));
+
+        if (stop.stop_requested()) return;
+        auto fr = fa->analyze(file);
+        if (fr.ok()) engine_results.push_back(std::move(fr.value()));
+
+        if (stop.stop_requested()) return;
+        auto sr = sandbox->analyze(file);
+        if (sr.ok()) engine_results.push_back(std::move(sr.value()));
+
+        if (stop.stop_requested()) return;
+        auto ar = advanced->analyze(file);
+        if (ar.ok()) engine_results.push_back(std::move(ar.value()));
+
+        if (stop.stop_requested()) return;
+        auto er = email->analyze(file);
+        if (er.ok()) engine_results.push_back(std::move(er.value()));
+
+        if (stop.stop_requested()) return;
+        auto cr = content->analyze(file);
+        if (cr.ok()) engine_results.push_back(std::move(cr.value()));
+
+        if (stop.stop_requested()) return;
+        auto lr = log_mgr->analyze(file);
+        if (lr.ok()) engine_results.push_back(std::move(lr.value()));
+
+        if (stop.stop_requested()) return;
+        std::string md5 = FileAnalyzer::compute_md5(file.ptr(), file.size());
+        auto enr = em->enrich_by_hash(sha256, md5);
+        if (enr.ok()) engine_results.push_back(std::move(enr.value()));
+
+        auto verdict_result = sc->score(engine_results);
+
+        json output;
+        if (verdict_result.ok()) {
+            output = {{"status", "complete"}, {"verdict", verdict_result.value()}};
+        } else {
+            output = {{"status", "error"}, {"error", verdict_result.error().message}};
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(*mtx);
+            (*results_map)[sha256] = output;
+        }
+
+        if (bridge) bridge->push_analysis_complete(sha256, output);
+    });
+
+    std::lock_guard<std::mutex> lock(threads_mutex_);
+    analysis_threads_.push_back(std::move(thread));
+}
+
 }  // namespace shieldtier

@@ -12,6 +12,7 @@ set(SHIELDTIER_SOURCES
     browser/navigation.cpp
     browser/scheme_handler.cpp
     ipc/message_handler.cpp
+    ipc/event_bridge.cpp
     config/config_store.cpp
     auth/auth_manager.cpp
     network/network_policy.cpp

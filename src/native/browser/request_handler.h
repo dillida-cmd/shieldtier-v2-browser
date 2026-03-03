@@ -4,6 +4,8 @@
 #include "include/cef_resource_request_handler.h"
 #include "include/wrapper/cef_message_router.h"
 
+#include "ipc/event_bridge.h"
+
 namespace shieldtier {
 
 class RequestHandler : public CefRequestHandler,
@@ -13,6 +15,10 @@ public:
 
     void set_message_router(CefRefPtr<CefMessageRouterBrowserSide> router) {
         message_router_ = router;
+    }
+
+    void set_event_bridge(shieldtier::EventBridge* bridge) {
+        event_bridge_ = bridge;
     }
 
     // CefRequestHandler
@@ -49,6 +55,7 @@ public:
 
 private:
     CefRefPtr<CefMessageRouterBrowserSide> message_router_;
+    shieldtier::EventBridge* event_bridge_ = nullptr;
 
     IMPLEMENT_REFCOUNTING(RequestHandler);
     DISALLOW_COPY_AND_ASSIGN(RequestHandler);
