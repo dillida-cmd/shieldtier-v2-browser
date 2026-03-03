@@ -1,5 +1,7 @@
 #include "vm/vm_scoring.h"
 
+#include <unordered_set>
+
 namespace shieldtier {
 
 namespace {
@@ -43,21 +45,23 @@ bool is_log_file(const std::string& path) {
 
 bool is_suspicious_process(const std::string& name) {
     auto lower = to_lower(name);
-    return lower == "cmd.exe" || lower == "powershell.exe" ||
-           lower == "wscript.exe" || lower == "cscript.exe" ||
-           lower == "mshta.exe" || lower == "regsvr32.exe" ||
-           lower == "rundll32.exe" ||
-           contains(lower, "cmd.exe") || contains(lower, "powershell.exe") ||
+    // Check substring — covers both exact match and full path
+    return contains(lower, "cmd.exe") || contains(lower, "powershell.exe") ||
            contains(lower, "wscript.exe") || contains(lower, "cscript.exe") ||
            contains(lower, "mshta.exe") || contains(lower, "regsvr32.exe") ||
            contains(lower, "rundll32.exe");
 }
 
+bool ends_with(const std::string& s, const std::string& suffix) {
+    if (suffix.size() > s.size()) return false;
+    return s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
 bool is_suspicious_tld(const std::string& domain) {
     auto lower = to_lower(domain);
-    return contains(lower, ".tk") || contains(lower, ".ml") ||
-           contains(lower, ".ga") || contains(lower, ".cf") ||
-           contains(lower, ".xyz");
+    return ends_with(lower, ".tk") || ends_with(lower, ".ml") ||
+           ends_with(lower, ".ga") || ends_with(lower, ".cf") ||
+           ends_with(lower, ".xyz");
 }
 
 }  // namespace
@@ -262,18 +266,13 @@ std::vector<Finding> VmScoring::network_to_findings(const json& network_activity
         network_activity["dns_queries"].is_array()) {
         const auto& queries = network_activity["dns_queries"];
         int suspicious_tld_count = 0;
-        std::vector<std::string> unique_domains;
+        std::unordered_set<std::string> unique_domains;
 
         for (const auto& query : queries) {
             auto domain = query.value("domain", "");
             if (domain.empty()) continue;
 
-            // Track unique domains
-            bool seen = false;
-            for (const auto& d : unique_domains) {
-                if (d == domain) { seen = true; break; }
-            }
-            if (!seen) unique_domains.push_back(domain);
+            unique_domains.insert(domain);
 
             if (is_suspicious_tld(domain)) {
                 ++suspicious_tld_count;
