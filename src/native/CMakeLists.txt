@@ -22,7 +22,10 @@ set(SHIELDTIER_SOURCES
     analysis/loganalysis/log_manager.cpp
     analysis/loganalysis/log_normalizer.cpp
     analysis/loganalysis/log_detector.cpp
+    analysis/threatfeed/threat_feed_manager.cpp
     scoring/scoring_engine.cpp
+    capture/capture_manager.cpp
+    capture/har_builder.cpp
     export/defang.cpp
     export/export_manager.cpp
 )
