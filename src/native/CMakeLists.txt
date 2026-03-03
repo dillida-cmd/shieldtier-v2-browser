@@ -18,6 +18,8 @@ set(SHIELDTIER_SOURCES
     analysis/enrichment/enrichment_manager.cpp
     analysis/enrichment/http_client.cpp
     scoring/scoring_engine.cpp
+    export/defang.cpp
+    export/export_manager.cpp
 )
 
 add_executable(shieldtier ${SHIELDTIER_SOURCES})
@@ -35,6 +37,7 @@ target_link_libraries(shieldtier PRIVATE
     yara
     pe-parse
     CURL::libcurl
+    LibArchive::LibArchive
 )
 
 # ---------------------------------------------------------------------------
