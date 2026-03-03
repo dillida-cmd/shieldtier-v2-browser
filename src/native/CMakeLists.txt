@@ -28,6 +28,8 @@ set(SHIELDTIER_SOURCES
     capture/har_builder.cpp
     export/defang.cpp
     export/export_manager.cpp
+    vm/vm_manager.cpp
+    vm/qemu_launcher.cpp
 )
 
 add_executable(shieldtier ${SHIELDTIER_SOURCES})
