@@ -10,7 +10,14 @@ export type IpcAction =
   | 'get_threat_feeds'
   | 'start_capture'
   | 'stop_capture'
-  | 'get_capture';
+  | 'get_capture'
+  | 'start_vm'
+  | 'stop_vm'
+  | 'submit_sample_to_vm'
+  | 'nav_back'
+  | 'nav_forward'
+  | 'nav_reload'
+  | 'nav_stop';
 
 export interface IpcResponse<T = unknown> {
   success: boolean;
@@ -93,4 +100,10 @@ export interface NetworkSummary {
   dns_query_count: number;
   http_request_count: number;
   connection_count: number;
+}
+
+export interface DownloadInfo {
+  sha256: string;
+  filename: string;
+  size: number;
 }

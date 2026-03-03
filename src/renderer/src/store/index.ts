@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type {
   AnalysisResult,
   CaptureData,
+  DownloadInfo,
   VmStatus,
   VmEvent,
   Finding,
@@ -55,6 +56,13 @@ interface ShieldTierState {
   vmProcessTree: ProcessNode[];
   vmNetworkSummary: NetworkSummary | null;
 
+  navCanGoBack: boolean;
+  navCanGoForward: boolean;
+  navIsLoading: boolean;
+  navCurrentUrl: string;
+  navTitle: string;
+  currentDownload: DownloadInfo | null;
+
   setPreset: (preset: LayoutPreset) => void;
   setTopSplit: (ratio: number) => void;
   setMainSplit: (ratio: number) => void;
@@ -69,6 +77,9 @@ interface ShieldTierState {
   setVmFindings: (findings: Finding[]) => void;
   setVmProcessTree: (tree: ProcessNode[]) => void;
   setVmNetworkSummary: (summary: NetworkSummary | null) => void;
+  setNavState: (state: { can_back: boolean; can_forward: boolean; loading: boolean; url: string; title: string }) => void;
+  setCurrentDownload: (info: DownloadInfo | null) => void;
+  setCurrentSha256: (sha256: string) => void;
 }
 
 export const useStore = create<ShieldTierState>()((set) => ({
@@ -96,6 +107,13 @@ export const useStore = create<ShieldTierState>()((set) => ({
   vmProcessTree: [],
   vmNetworkSummary: null,
 
+  navCanGoBack: false,
+  navCanGoForward: false,
+  navIsLoading: false,
+  navCurrentUrl: '',
+  navTitle: '',
+  currentDownload: null,
+
   setPreset: (preset) => {
     const config = PRESET_CONFIGS[preset];
     set({
@@ -113,7 +131,7 @@ export const useStore = create<ShieldTierState>()((set) => ({
   setBottomTabs: (bottomTabs) => set({ bottomTabs }),
   setAnalysis: (sha256, result) => set({
     currentSha256: sha256,
-    analysisStatus: result.status === 'complete' ? 'complete' : result.status === 'error' ? 'error' : 'pending',
+    analysisStatus: result.status === 'complete' ? 'complete' : (result.status === 'error' || result.status === 'not_found') ? 'error' : 'pending',
     analysisResult: result,
   }),
   setCaptureData: (captureData) => set({ captureData }),
@@ -123,4 +141,17 @@ export const useStore = create<ShieldTierState>()((set) => ({
   setVmFindings: (vmFindings) => set({ vmFindings }),
   setVmProcessTree: (vmProcessTree) => set({ vmProcessTree }),
   setVmNetworkSummary: (vmNetworkSummary) => set({ vmNetworkSummary }),
+  setNavState: (state) => set({
+    navCanGoBack: state.can_back,
+    navCanGoForward: state.can_forward,
+    navIsLoading: state.loading,
+    navCurrentUrl: state.url,
+    navTitle: state.title,
+  }),
+  setCurrentDownload: (currentDownload) => set({ currentDownload }),
+  setCurrentSha256: (sha256) => set({
+    currentSha256: sha256,
+    analysisStatus: 'pending',
+    analysisResult: null,
+  }),
 }));
