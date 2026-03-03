@@ -19,6 +19,9 @@ set(SHIELDTIER_SOURCES
     analysis/enrichment/http_client.cpp
     analysis/email/email_analyzer.cpp
     analysis/content/content_analyzer.cpp
+    analysis/loganalysis/log_manager.cpp
+    analysis/loganalysis/log_normalizer.cpp
+    analysis/loganalysis/log_detector.cpp
     scoring/scoring_engine.cpp
     export/defang.cpp
     export/export_manager.cpp
