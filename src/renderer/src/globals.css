@@ -1,9 +1,103 @@
 @import "tailwindcss";
 
-:root {
-  --st-bg-primary: #0a0a0a;
-  --st-text-primary: #00ff41;
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-weight: 100 800;
+  font-display: swap;
+  src: url('/fonts/JetBrainsMono-Variable.woff2') format('woff2');
 }
 
-* { box-sizing: border-box; margin: 0; padding: 0; }
-html, body, #root { height: 100%; width: 100%; overflow: hidden; background: var(--st-bg-primary); color: var(--st-text-primary); font-family: monospace; }
+:root {
+  --st-bg-primary: #0a0a0a;
+  --st-bg-panel: #0f1117;
+  --st-bg-elevated: #151921;
+  --st-bg-hover: #1a1f2e;
+  --st-border: #1c2030;
+  --st-border-bright: #2a3045;
+  --st-text-primary: #00ff41;
+  --st-text-secondary: #00cc33;
+  --st-text-muted: #2d5a35;
+  --st-text-label: #94a3b8;
+  --st-accent: #3b82f6;
+  --st-accent-dim: rgba(59, 130, 246, 0.1);
+  --st-severity-critical: #ff0040;
+  --st-severity-high: #ff6600;
+  --st-severity-medium: #ffcc00;
+  --st-severity-low: #00ccff;
+  --st-severity-clean: #00ff41;
+  --st-font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', ui-monospace, monospace;
+  --st-font-ui: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  background: var(--st-bg-primary);
+  color: var(--st-text-primary);
+  font-family: var(--st-font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.03) 2px,
+    rgba(0, 0, 0, 0.03) 3px
+  );
+}
+
+.glass {
+  background: rgba(15, 17, 23, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.glass-heavy {
+  background: rgba(10, 10, 10, 0.92);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.glow {
+  text-shadow: 0 0 6px var(--st-text-primary);
+}
+
+.glow-accent {
+  text-shadow: 0 0 6px var(--st-accent);
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--st-border-bright);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--st-text-muted);
+}
+
+::selection {
+  background: rgba(59, 130, 246, 0.3);
+  color: var(--st-text-primary);
+}
