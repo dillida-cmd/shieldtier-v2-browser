@@ -13,7 +13,17 @@
 #include "analysis/yara/yara_engine.h"
 #include "analysis/fileanalysis/file_analyzer.h"
 #include "analysis/enrichment/enrichment_manager.h"
+#include "analysis/sandbox/sandbox_engine.h"
+#include "analysis/advanced/advanced_engine.h"
+#include "analysis/email/email_analyzer.h"
+#include "analysis/content/content_analyzer.h"
+#include "analysis/loganalysis/log_manager.h"
+#include "analysis/threatfeed/threat_feed_manager.h"
 #include "browser/session_manager.h"
+#include "capture/capture_manager.h"
+#include "capture/har_builder.h"
+#include "config/config_store.h"
+#include "export/export_manager.h"
 #include "ipc/ipc_protocol.h"
 #include "scoring/scoring_engine.h"
 
@@ -38,6 +48,13 @@ private:
     json handle_close_tab(const json& payload);
     json handle_analyze_download(const json& payload);
     json handle_get_analysis_result(const json& payload);
+    json handle_get_config(const json& payload);
+    json handle_set_config(const json& payload);
+    json handle_export_report(const json& payload);
+    json handle_get_threat_feeds(const json& payload);
+    json handle_start_capture(const json& payload);
+    json handle_stop_capture(const json& payload);
+    json handle_get_capture(const json& payload);
 
     SessionManager* session_manager_;
     std::unordered_map<std::string, json> analysis_results_;
@@ -47,6 +64,16 @@ private:
     std::unique_ptr<FileAnalyzer> file_analyzer_;
     std::unique_ptr<EnrichmentManager> enrichment_manager_;
     std::unique_ptr<ScoringEngine> scoring_engine_;
+    std::unique_ptr<SandboxEngine> sandbox_engine_;
+    std::unique_ptr<AdvancedEngine> advanced_engine_;
+    std::unique_ptr<EmailAnalyzer> email_analyzer_;
+    std::unique_ptr<ContentAnalyzer> content_analyzer_;
+    std::unique_ptr<LogManager> log_manager_;
+    std::unique_ptr<ThreatFeedManager> threat_feed_manager_;
+    std::unique_ptr<CaptureManager> capture_manager_;
+    std::unique_ptr<ConfigStore> config_store_;
+    std::unique_ptr<ExportManager> export_manager_;
+    HarBuilder har_builder_;
 
     std::vector<std::jthread> analysis_threads_;
     std::mutex threads_mutex_;

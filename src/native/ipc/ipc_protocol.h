@@ -11,6 +11,13 @@ inline constexpr const char* kActionGetTabs = "get_tabs";
 inline constexpr const char* kActionCloseTab = "close_tab";
 inline constexpr const char* kActionAnalyzeDownload = "analyze_download";
 inline constexpr const char* kActionGetAnalysisResult = "get_analysis_result";
+inline constexpr const char* kActionGetConfig = "get_config";
+inline constexpr const char* kActionSetConfig = "set_config";
+inline constexpr const char* kActionExportReport = "export_report";
+inline constexpr const char* kActionGetThreatFeeds = "get_threat_feeds";
+inline constexpr const char* kActionStartCapture = "start_capture";
+inline constexpr const char* kActionStopCapture = "stop_capture";
+inline constexpr const char* kActionGetCapture = "get_capture";
 
 struct IpcRequest {
     std::string action;

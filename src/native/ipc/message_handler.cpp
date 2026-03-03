@@ -12,8 +12,19 @@ MessageHandler::MessageHandler(SessionManager* session_manager)
       yara_engine_(std::make_unique<YaraEngine>()),
       file_analyzer_(std::make_unique<FileAnalyzer>()),
       enrichment_manager_(std::make_unique<EnrichmentManager>(EnrichmentConfig{})),
-      scoring_engine_(std::make_unique<ScoringEngine>()) {
+      scoring_engine_(std::make_unique<ScoringEngine>()),
+      sandbox_engine_(std::make_unique<SandboxEngine>()),
+      advanced_engine_(std::make_unique<AdvancedEngine>()),
+      email_analyzer_(std::make_unique<EmailAnalyzer>()),
+      content_analyzer_(std::make_unique<ContentAnalyzer>()),
+      log_manager_(std::make_unique<LogManager>()),
+      threat_feed_manager_(std::make_unique<ThreatFeedManager>()),
+      capture_manager_(std::make_unique<CaptureManager>()),
+      config_store_(std::make_unique<ConfigStore>("shieldtier.json")),
+      export_manager_(std::make_unique<ExportManager>()) {
     yara_engine_->initialize();
+    config_store_->load();
+    threat_feed_manager_->update_feeds();
 }
 
 MessageHandler::~MessageHandler() {
@@ -42,6 +53,20 @@ bool MessageHandler::OnQuery(CefRefPtr<CefBrowser> browser,
             result = handle_analyze_download(req.payload);
         } else if (req.action == ipc::kActionGetAnalysisResult) {
             result = handle_get_analysis_result(req.payload);
+        } else if (req.action == ipc::kActionGetConfig) {
+            result = handle_get_config(req.payload);
+        } else if (req.action == ipc::kActionSetConfig) {
+            result = handle_set_config(req.payload);
+        } else if (req.action == ipc::kActionExportReport) {
+            result = handle_export_report(req.payload);
+        } else if (req.action == ipc::kActionGetThreatFeeds) {
+            result = handle_get_threat_feeds(req.payload);
+        } else if (req.action == ipc::kActionStartCapture) {
+            result = handle_start_capture(req.payload);
+        } else if (req.action == ipc::kActionStopCapture) {
+            result = handle_stop_capture(req.payload);
+        } else if (req.action == ipc::kActionGetCapture) {
+            result = handle_get_capture(req.payload);
         } else {
             callback->Failure(404, ipc::make_error("unknown_action").dump());
             return true;
@@ -124,10 +149,16 @@ json MessageHandler::handle_analyze_download(const json& payload) {
     auto* fa = file_analyzer_.get();
     auto* em = enrichment_manager_.get();
     auto* sc = scoring_engine_.get();
+    auto* sandbox = sandbox_engine_.get();
+    auto* advanced = advanced_engine_.get();
+    auto* email = email_analyzer_.get();
+    auto* content = content_analyzer_.get();
+    auto* log_mgr = log_manager_.get();
     auto* results_map = &analysis_results_;
     auto* mtx = &results_mutex_;
 
-    std::jthread thread([sha256, sm, yara, fa, em, sc, results_map, mtx]
+    std::jthread thread([sha256, sm, yara, fa, em, sc, sandbox, advanced,
+                         email, content, log_mgr, results_map, mtx]
                         (std::stop_token stop) {
         auto file_opt = sm->get_captured_download(sha256);
         if (!file_opt.has_value()) {
@@ -154,6 +185,41 @@ json MessageHandler::handle_analyze_download(const json& payload) {
         auto fa_result = fa->analyze(file);
         if (fa_result.ok()) {
             engine_results.push_back(std::move(fa_result.value()));
+        }
+
+        if (stop.stop_requested()) return;
+
+        auto sandbox_result = sandbox->analyze(file);
+        if (sandbox_result.ok()) {
+            engine_results.push_back(std::move(sandbox_result.value()));
+        }
+
+        if (stop.stop_requested()) return;
+
+        auto advanced_result = advanced->analyze(file);
+        if (advanced_result.ok()) {
+            engine_results.push_back(std::move(advanced_result.value()));
+        }
+
+        if (stop.stop_requested()) return;
+
+        auto email_result = email->analyze(file);
+        if (email_result.ok()) {
+            engine_results.push_back(std::move(email_result.value()));
+        }
+
+        if (stop.stop_requested()) return;
+
+        auto content_result = content->analyze(file);
+        if (content_result.ok()) {
+            engine_results.push_back(std::move(content_result.value()));
+        }
+
+        if (stop.stop_requested()) return;
+
+        auto log_result = log_mgr->analyze(file);
+        if (log_result.ok()) {
+            engine_results.push_back(std::move(log_result.value()));
         }
 
         if (stop.stop_requested()) return;
@@ -203,6 +269,113 @@ json MessageHandler::handle_get_analysis_result(const json& payload) {
         return ipc::make_success(it->second);
     }
     return ipc::make_success({{"status", "not_found"}});
+}
+
+json MessageHandler::handle_get_config(const json& payload) {
+    std::string key = payload.value("key", "");
+    if (key.empty()) {
+        return ipc::make_success(config_store_->get_all());
+    }
+    return ipc::make_success(config_store_->get(key));
+}
+
+json MessageHandler::handle_set_config(const json& payload) {
+    std::string key = payload.value("key", "");
+    if (key.empty()) {
+        return ipc::make_error("key_required");
+    }
+    if (!payload.contains("value")) {
+        return ipc::make_error("value_required");
+    }
+    config_store_->set(key, payload["value"]);
+    auto save_result = config_store_->save();
+    if (!save_result.ok()) {
+        return ipc::make_error(save_result.error().message);
+    }
+    return ipc::make_success();
+}
+
+json MessageHandler::handle_export_report(const json& payload) {
+    std::string sha256 = payload.value("sha256", "");
+    std::string format = payload.value("format", "json");
+    std::string output_dir = payload.value("output_dir", ".");
+
+    if (sha256.empty()) {
+        return ipc::make_error("sha256_required");
+    }
+
+    json verdict_data;
+    {
+        std::lock_guard<std::mutex> lock(results_mutex_);
+        auto it = analysis_results_.find(sha256);
+        if (it == analysis_results_.end() || it->second.value("status", "") != "complete") {
+            return ipc::make_error("analysis_not_complete");
+        }
+        verdict_data = it->second.value("verdict", json::object());
+    }
+
+    ThreatVerdict verdict = verdict_data.get<ThreatVerdict>();
+
+    Result<std::string> result;
+    if (format == "html") {
+        result = export_manager_->export_html(verdict, sha256);
+    } else if (format == "zip") {
+        result = export_manager_->export_zip(verdict, sha256, output_dir);
+    } else {
+        result = export_manager_->export_json(verdict, sha256);
+    }
+
+    if (!result.ok()) {
+        return ipc::make_error(result.error().message);
+    }
+    return ipc::make_success({{"path", result.value()}});
+}
+
+json MessageHandler::handle_get_threat_feeds(const json& /*payload*/) {
+    return ipc::make_success({
+        {"indicator_count", threat_feed_manager_->indicator_count()}
+    });
+}
+
+json MessageHandler::handle_start_capture(const json& payload) {
+    int browser_id = payload.value("browser_id", -1);
+    if (browser_id < 0) {
+        return ipc::make_error("browser_id_required");
+    }
+    capture_manager_->start_capture(browser_id);
+    return ipc::make_success();
+}
+
+json MessageHandler::handle_stop_capture(const json& payload) {
+    int browser_id = payload.value("browser_id", -1);
+    if (browser_id < 0) {
+        return ipc::make_error("browser_id_required");
+    }
+    capture_manager_->stop_capture(browser_id);
+
+    auto requests = capture_manager_->get_requests(browser_id);
+    auto har = har_builder_.build_string(requests);
+
+    return ipc::make_success({
+        {"request_count", requests.size()},
+        {"har", har}
+    });
+}
+
+json MessageHandler::handle_get_capture(const json& payload) {
+    int browser_id = payload.value("browser_id", -1);
+    if (browser_id < 0) {
+        return ipc::make_error("browser_id_required");
+    }
+
+    auto requests = capture_manager_->get_requests(browser_id);
+    auto har = har_builder_.build_string(requests);
+
+    return ipc::make_success({
+        {"capturing", capture_manager_->is_capturing(browser_id)},
+        {"request_count", requests.size()},
+        {"har", har}
+    });
 }
 
 }  // namespace shieldtier

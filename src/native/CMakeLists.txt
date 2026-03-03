@@ -11,12 +11,25 @@ set(SHIELDTIER_SOURCES
     browser/session_manager.cpp
     browser/navigation.cpp
     ipc/message_handler.cpp
+    config/config_store.cpp
+    auth/auth_manager.cpp
+    network/network_policy.cpp
+    chat/chat_manager.cpp
+    chat/shieldcrypt.cpp
     analysis/yara/yara_engine.cpp
     analysis/yara/rule_manager.cpp
     analysis/fileanalysis/file_analyzer.cpp
     analysis/fileanalysis/pe_analyzer.cpp
     analysis/enrichment/enrichment_manager.cpp
     analysis/enrichment/http_client.cpp
+    analysis/sandbox/sandbox_engine.cpp
+    analysis/sandbox/behavior_signatures.cpp
+    analysis/sandbox/network_profiler.cpp
+    analysis/advanced/advanced_engine.cpp
+    analysis/advanced/pe_capability.cpp
+    analysis/advanced/shellcode_detector.cpp
+    analysis/advanced/script_analyzer.cpp
+    analysis/advanced/heap_analyzer.cpp
     analysis/email/email_analyzer.cpp
     analysis/content/content_analyzer.cpp
     analysis/loganalysis/log_manager.cpp
@@ -52,6 +65,7 @@ target_link_libraries(shieldtier PRIVATE
     pe-parse
     CURL::libcurl
     LibArchive::LibArchive
+    sodium
 )
 
 # ---------------------------------------------------------------------------
