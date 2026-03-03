@@ -51,12 +51,51 @@ Result<std::string> VmManager::create_vm(const VmConfig& config) {
     auto snapshot_path = vm_dir + "/snapshot.qcow2";
 
     // Create QCOW2 overlay backed by the base image
-    std::string cmd = "qemu-img create -f qcow2 -b " + config.image_path +
-                      " -F qcow2 " + snapshot_path;
-    int ret = std::system(cmd.c_str());
-    if (ret != 0) {
-        std::filesystem::remove_all(vm_dir);
-        return Error{"failed to create QCOW2 overlay", "SNAPSHOT_FAILED"};
+    // Use posix_spawn/CreateProcess instead of system() to avoid command injection
+    {
+        auto qemu_img = std::string("qemu-img");
+#ifdef _WIN32
+        std::string cmd_line = "qemu-img create -f qcow2 -b \"" +
+                               config.image_path + "\" -F qcow2 \"" +
+                               snapshot_path + "\"";
+        STARTUPINFOA si = {};
+        si.cb = sizeof(si);
+        PROCESS_INFORMATION pi = {};
+        if (!CreateProcessA(nullptr, cmd_line.data(), nullptr, nullptr, FALSE,
+                            CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
+            std::filesystem::remove_all(vm_dir);
+            return Error{"failed to create QCOW2 overlay", "SNAPSHOT_FAILED"};
+        }
+        WaitForSingleObject(pi.hProcess, INFINITE);
+        DWORD exit_code = 1;
+        GetExitCodeProcess(pi.hProcess, &exit_code);
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+        if (exit_code != 0) {
+            std::filesystem::remove_all(vm_dir);
+            return Error{"failed to create QCOW2 overlay", "SNAPSHOT_FAILED"};
+        }
+#else
+        std::vector<const char*> argv = {
+            "qemu-img", "create", "-f", "qcow2",
+            "-b", config.image_path.c_str(),
+            "-F", "qcow2", snapshot_path.c_str(), nullptr
+        };
+        pid_t pid;
+        int spawn_status = posix_spawnp(&pid, "qemu-img", nullptr, nullptr,
+                                        const_cast<char* const*>(argv.data()),
+                                        environ);
+        if (spawn_status != 0) {
+            std::filesystem::remove_all(vm_dir);
+            return Error{"failed to create QCOW2 overlay", "SNAPSHOT_FAILED"};
+        }
+        int wait_status;
+        waitpid(pid, &wait_status, 0);
+        if (!WIFEXITED(wait_status) || WEXITSTATUS(wait_status) != 0) {
+            std::filesystem::remove_all(vm_dir);
+            return Error{"failed to create QCOW2 overlay", "SNAPSHOT_FAILED"};
+        }
+#endif
     }
 
     std::lock_guard<std::mutex> lock(mutex_);
@@ -85,25 +124,37 @@ Result<bool> VmManager::start_vm(const std::string& vm_id) {
     }
 
     vm.state = VmState::kBooting;
+    VmInstance vm_copy = vm;
     lock.unlock();
 
-    auto launch_result = launcher_.launch(vms_.at(vm_id));
+    auto launch_result = launcher_.launch(vm_copy);
     if (!launch_result.ok()) {
         std::lock_guard<std::mutex> relock(mutex_);
-        vms_.at(vm_id).state = VmState::kError;
+        auto it2 = vms_.find(vm_id);
+        if (it2 != vms_.end()) it2->second.state = VmState::kError;
         return Error{launch_result.error().message, launch_result.error().code};
     }
 
     auto ready_result = wait_for_ready(vm_id, 60000);
+
+    std::lock_guard<std::mutex> relock(mutex_);
+    auto it2 = vms_.find(vm_id);
+    if (it2 == vms_.end()) {
+        launcher_.stop(vm_copy.pid);
+        return Error{"VM destroyed during launch", "DESTROYED"};
+    }
+
+    it2->second.pid = vm_copy.pid;
+    it2->second.monitor_port = vm_copy.monitor_port;
+    it2->second.serial_port = vm_copy.serial_port;
+
     if (!ready_result.ok()) {
-        std::lock_guard<std::mutex> relock(mutex_);
-        vms_.at(vm_id).state = VmState::kError;
+        it2->second.state = VmState::kError;
         return Error{"VM failed to become ready: " + ready_result.error().message,
                      "BOOT_TIMEOUT"};
     }
 
-    std::lock_guard<std::mutex> relock(mutex_);
-    vms_.at(vm_id).state = VmState::kReady;
+    it2->second.state = VmState::kReady;
     return true;
 }
 
@@ -128,16 +179,18 @@ Result<bool> VmManager::stop_vm(const std::string& vm_id) {
     auto stop_result = launcher_.stop(pid);
 
     std::lock_guard<std::mutex> relock(mutex_);
-    auto& stopped_vm = vms_.at(vm_id);
-    stopped_vm.state = VmState::kStopped;
-    stopped_vm.pid = -1;
-    stopped_vm.monitor_port = -1;
-    stopped_vm.serial_port = -1;
+    auto stop_it = vms_.find(vm_id);
+    if (stop_it == vms_.end()) return true;
 
     if (!stop_result.ok()) {
+        stop_it->second.state = VmState::kError;
         return Error{stop_result.error().message, stop_result.error().code};
     }
 
+    stop_it->second.state = VmState::kStopped;
+    stop_it->second.pid = -1;
+    stop_it->second.monitor_port = -1;
+    stop_it->second.serial_port = -1;
     return true;
 }
 
@@ -298,8 +351,11 @@ Result<bool> VmManager::inject_sample(const std::string& vm_id,
         std::filesystem::create_directories(sample_dir);
     }
 
-    auto filename = file.filename.empty() ? "sample.bin" : file.filename;
-    auto sample_path = sample_dir + "/" + filename;
+    auto safe_name = std::filesystem::path(file.filename).filename().string();
+    if (safe_name.empty() || safe_name == "." || safe_name == "..") {
+        safe_name = "sample.bin";
+    }
+    auto sample_path = sample_dir + "/" + safe_name;
 
     std::ofstream out(sample_path, std::ios::binary);
     if (!out) {

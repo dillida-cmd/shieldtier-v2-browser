@@ -2,6 +2,7 @@
 
 #include <cstdlib>
 #include <filesystem>
+#include <mutex>
 #include <random>
 
 #ifdef _WIN32
@@ -55,8 +56,8 @@ Result<int> QemuLauncher::launch(VmInstance& vm) {
     argv.push_back(nullptr);
 
     pid_t pid;
-    int status = posix_spawn(&pid, binary.c_str(), nullptr, nullptr,
-                             const_cast<char* const*>(argv.data()), environ);
+    int status = posix_spawnp(&pid, binary.c_str(), nullptr, nullptr,
+                              const_cast<char* const*>(argv.data()), environ);
     if (status != 0) {
         return Error{"failed to spawn QEMU: " + std::string(strerror(status)),
                      "LAUNCH_FAILED"};
@@ -126,7 +127,12 @@ bool QemuLauncher::is_running(int pid) const {
     CloseHandle(proc);
     return alive;
 #else
-    return kill(pid, 0) == 0;
+    // Use waitpid to reap zombies and detect exited processes
+    int wait_status;
+    pid_t result = waitpid(pid, &wait_status, WNOHANG);
+    if (result == pid) return false;   // exited (reaped)
+    if (result == -1) return false;    // no such child
+    return kill(pid, 0) == 0;          // still running
 #endif
 }
 
@@ -214,10 +220,12 @@ std::vector<std::string> QemuLauncher::build_args(const VmInstance& vm) const {
 }
 
 int QemuLauncher::allocate_port() const {
-    // Bind to port 0 to let the OS assign a free port, then close
 #ifdef _WIN32
-    WSADATA wsa;
-    WSAStartup(MAKEWORD(2, 2), &wsa);
+    static std::once_flag wsa_init;
+    std::call_once(wsa_init, [] {
+        WSADATA wsa;
+        WSAStartup(MAKEWORD(2, 2), &wsa);
+    });
 #endif
 
     int sock = static_cast<int>(socket(AF_INET, SOCK_STREAM, 0));
