@@ -25,7 +25,9 @@ public:
         CC_SHA256_Init(&ctx_);
 #else
         ctx_ = EVP_MD_CTX_new();
-        EVP_DigestInit_ex(ctx_, EVP_sha256(), nullptr);
+        if (ctx_) {
+            EVP_DigestInit_ex(ctx_, EVP_sha256(), nullptr);
+        }
 #endif
     }
 
@@ -41,10 +43,19 @@ public:
     Sha256Hasher& operator=(const Sha256Hasher&) = delete;
 
     void update(const void* data, size_t len) {
+        if (len == 0) return;
 #if defined(OS_MAC)
-        CC_SHA256_Update(&ctx_, data, static_cast<CC_LONG>(len));
+        auto* p = static_cast<const uint8_t*>(data);
+        while (len > 0) {
+            CC_LONG chunk = static_cast<CC_LONG>(std::min(len, static_cast<size_t>(UINT32_MAX)));
+            CC_SHA256_Update(&ctx_, p, chunk);
+            p += chunk;
+            len -= chunk;
+        }
 #else
-        EVP_DigestUpdate(ctx_, data, len);
+        if (ctx_) {
+            EVP_DigestUpdate(ctx_, data, len);
+        }
 #endif
     }
 
@@ -53,8 +64,10 @@ public:
 #if defined(OS_MAC)
         CC_SHA256_Final(digest.data(), &ctx_);
 #else
-        unsigned int digest_len = 0;
-        EVP_DigestFinal_ex(ctx_, digest.data(), &digest_len);
+        if (ctx_) {
+            unsigned int digest_len = 0;
+            EVP_DigestFinal_ex(ctx_, digest.data(), &digest_len);
+        }
 #endif
         std::ostringstream hex;
         hex << std::hex << std::setfill('0');
@@ -79,7 +92,6 @@ private:
 static bool has_attachment_disposition(CefRefPtr<CefResponse> response) {
     CefString disposition = response->GetHeaderByName("Content-Disposition");
     std::string val = disposition.ToString();
-    // Case-insensitive check for "attachment"
     std::string lower;
     lower.reserve(val.size());
     for (char c : val) {
@@ -112,14 +124,13 @@ static bool has_suspicious_extension(const std::string& url) {
         ".img", ".cab", ".lnk",
     };
 
-    // Find the path component (strip query/fragment)
     std::string path = url;
     auto query_pos = path.find('?');
     if (query_pos != std::string::npos) path.resize(query_pos);
     auto frag_pos = path.find('#');
     if (frag_pos != std::string::npos) path.resize(frag_pos);
 
-    // Lowercase the tail for comparison
+    // Lowercase the tail for case-insensitive extension matching
     std::string tail;
     if (path.size() > 8) {
         tail = path.substr(path.size() - 8);
@@ -184,7 +195,7 @@ DownloadCaptureFilter::DownloadCaptureFilter(const std::string& url,
 
 bool DownloadCaptureFilter::InitFilter() {
     hasher_ = std::make_unique<HasherImpl>();
-    buffer_.reserve(256 * 1024);
+    buffer_.reserve(1024 * 1024);
     return true;
 }
 
@@ -192,7 +203,6 @@ CefResponseFilter::FilterStatus DownloadCaptureFilter::Filter(
     void* data_in, size_t data_in_size, size_t& data_in_read,
     void* data_out, size_t data_out_size, size_t& data_out_written) {
 
-    // Completion signal
     if (data_in_size == 0) {
         data_in_read = 0;
         data_out_written = 0;
@@ -208,7 +218,6 @@ CefResponseFilter::FilterStatus DownloadCaptureFilter::Filter(
 
     hasher_->hasher.update(data_in, to_copy);
 
-    // Accumulate if we haven't exceeded the cap
     if (!overflow_) {
         if (buffer_.size() + to_copy > kMaxCaptureSize) {
             overflow_ = true;
@@ -220,7 +229,10 @@ CefResponseFilter::FilterStatus DownloadCaptureFilter::Filter(
         }
     }
 
-    return RESPONSE_FILTER_NEED_MORE_DATA;
+    // DONE = all input consumed, no pending output. CEF will call again with
+    // next network chunk. NEED_MORE_DATA = partial read, re-present remainder.
+    return (to_copy == data_in_size) ? RESPONSE_FILTER_DONE
+                                     : RESPONSE_FILTER_NEED_MORE_DATA;
 }
 
 // ---------------------------------------------------------------------------
@@ -263,7 +275,8 @@ CefResponseFilter::FilterStatus StreamingHashFilter::Filter(
 
     hasher_->hasher.update(data_in, to_copy);
 
-    return RESPONSE_FILTER_NEED_MORE_DATA;
+    return (to_copy == data_in_size) ? RESPONSE_FILTER_DONE
+                                     : RESPONSE_FILTER_NEED_MORE_DATA;
 }
 
 }  // namespace shieldtier
