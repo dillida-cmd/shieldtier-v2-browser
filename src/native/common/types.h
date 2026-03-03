@@ -1,9 +1,7 @@
 #pragma once
 
 #include <cstdint>
-#include <optional>
 #include <string>
-#include <variant>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -66,11 +64,21 @@ struct FileBuffer {
     const uint8_t* ptr() const { return data.data(); }
 };
 
+enum class Severity { kInfo, kLow, kMedium, kHigh, kCritical };
+
+NLOHMANN_JSON_SERIALIZE_ENUM(Severity, {
+    {Severity::kInfo, "info"},
+    {Severity::kLow, "low"},
+    {Severity::kMedium, "medium"},
+    {Severity::kHigh, "high"},
+    {Severity::kCritical, "critical"},
+})
+
 struct Finding {
     std::string title;
     std::string description;
-    std::string severity;
-    std::string engine;
+    Severity severity;
+    AnalysisEngine engine;
     nlohmann::json metadata;
 };
 
@@ -84,6 +92,9 @@ struct AnalysisEngineResult {
     nlohmann::json raw_output;
     double duration_ms;
 };
+
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(AnalysisEngineResult, engine, success, error,
+                                   findings, raw_output, duration_ms)
 
 struct ThreatVerdict {
     Verdict verdict;
