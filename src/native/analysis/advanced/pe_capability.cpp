@@ -140,7 +140,7 @@ std::vector<Finding> PeCapability::analyze(const std::vector<std::string>& impor
         std::vector<std::string> matched;
         for (const auto& api : cap.apis) {
             for (const auto& imp : imports) {
-                if (imp.find(api) != std::string::npos) {
+                if (imp == api) {
                     matched.push_back(api);
                     break;
                 }

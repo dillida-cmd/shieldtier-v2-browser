@@ -21,8 +21,8 @@ bool contains_ci(const std::string& haystack, const std::string& needle) {
 
 std::vector<Finding> ScriptAnalyzer::analyze(const uint8_t* data, size_t size) {
     if (!data || size == 0) return {};
-
-    std::string content(reinterpret_cast<const char*>(data), size);
+    constexpr size_t kMaxScanBytes = 16 * 1024 * 1024;
+    std::string content(reinterpret_cast<const char*>(data), std::min(size, kMaxScanBytes));
     std::vector<Finding> findings;
 
     auto ps = detect_powershell(content);

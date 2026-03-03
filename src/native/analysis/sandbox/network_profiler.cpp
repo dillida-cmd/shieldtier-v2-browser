@@ -47,26 +47,18 @@ const std::vector<std::pair<std::string, std::string>> kNetworkImports = {
 };
 
 bool is_private_ip(const std::string& ip) {
-    return ip.find("10.") == 0 ||
-           ip.find("127.") == 0 ||
-           ip.find("192.168.") == 0 ||
-           ip.find("172.16.") == 0 ||
-           ip.find("172.17.") == 0 ||
-           ip.find("172.18.") == 0 ||
-           ip.find("172.19.") == 0 ||
-           ip.find("172.20.") == 0 ||
-           ip.find("172.21.") == 0 ||
-           ip.find("172.22.") == 0 ||
-           ip.find("172.23.") == 0 ||
-           ip.find("172.24.") == 0 ||
-           ip.find("172.25.") == 0 ||
-           ip.find("172.26.") == 0 ||
-           ip.find("172.27.") == 0 ||
-           ip.find("172.28.") == 0 ||
-           ip.find("172.29.") == 0 ||
-           ip.find("172.30.") == 0 ||
-           ip.find("172.31.") == 0 ||
-           ip == "0.0.0.0";
+    if (ip.rfind("10.", 0) == 0 || ip.rfind("127.", 0) == 0 ||
+        ip.rfind("192.168.", 0) == 0 || ip == "0.0.0.0") {
+        return true;
+    }
+    if (ip.rfind("172.", 0) == 0) {
+        auto dot2 = ip.find('.', 4);
+        if (dot2 != std::string::npos) {
+            int second = std::stoi(ip.substr(4, dot2 - 4));
+            return second >= 16 && second <= 31;
+        }
+    }
+    return false;
 }
 
 }  // namespace

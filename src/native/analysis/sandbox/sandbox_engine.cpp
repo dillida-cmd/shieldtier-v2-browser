@@ -54,7 +54,7 @@ Result<AnalysisEngineResult> SandboxEngine::analyze(const FileBuffer& file) {
 
     // Network profiling
     NetworkProfiler profiler;
-    auto net_findings = profiler.profile(strings, strings);
+    auto net_findings = profiler.profile(strings, {});
 
     auto findings = events_to_findings(events);
     findings.insert(findings.end(), net_findings.begin(), net_findings.end());
@@ -94,7 +94,7 @@ std::vector<BehaviorEvent> SandboxEngine::analyze_import_behavior(
         for (const auto& api : pattern.required_apis) {
             bool found = false;
             for (const auto& s : strings) {
-                if (s.find(api) != std::string::npos) {
+                if (s == api) {
                     found = true;
                     break;
                 }
@@ -164,7 +164,7 @@ std::vector<BehaviorEvent> SandboxEngine::analyze_resource_behavior(
 
     // Scan for embedded PE files (MZ header followed by PE\0\0 at the e_lfanew offset)
     // Skip the first MZ at offset 0 — that's the file itself
-    for (size_t i = 1; i < size - 4; ++i) {
+    for (size_t i = 1; i + 4 < size; ++i) {
         if (data[i] == 'M' && data[i + 1] == 'Z') {
             // Check for PE signature at the offset stored at e_lfanew (offset 0x3C from MZ)
             if (i + 0x3C + 4 <= size) {

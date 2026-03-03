@@ -132,11 +132,13 @@ bool ShellcodeDetector::detect_xor_decode(const uint8_t* data, size_t size) {
     // Try single-byte XOR keys 0x01-0xFF on sliding windows
     constexpr size_t kWindowSize = 64;
     constexpr double kPrintableThreshold = 0.60;
+    constexpr size_t kMaxXorScanBytes = 2 * 1024 * 1024;
+    size_t scan_size = std::min(size, kMaxXorScanBytes);
 
-    if (size < kWindowSize) return false;
+    if (scan_size < kWindowSize) return false;
 
     for (uint8_t key = 1; key != 0; ++key) {
-        for (size_t i = 0; i + kWindowSize <= size; i += kWindowSize) {
+        for (size_t i = 0; i + kWindowSize <= scan_size; i += kWindowSize) {
             size_t printable = 0;
             for (size_t j = 0; j < kWindowSize; ++j) {
                 uint8_t decoded = data[i + j] ^ key;
