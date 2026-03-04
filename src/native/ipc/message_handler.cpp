@@ -21,7 +21,8 @@ MessageHandler::MessageHandler(SessionManager* session_manager)
       threat_feed_manager_(std::make_unique<ThreatFeedManager>()),
       capture_manager_(std::make_unique<CaptureManager>()),
       config_store_(std::make_unique<ConfigStore>("shieldtier.json")),
-      export_manager_(std::make_unique<ExportManager>()) {
+      export_manager_(std::make_unique<ExportManager>()),
+      vm_manager_(std::make_unique<VmManager>("/tmp/shieldtier/vms")) {
     yara_engine_->initialize();
     config_store_->load();
     threat_feed_manager_->update_feeds();
@@ -75,6 +76,12 @@ bool MessageHandler::OnQuery(CefRefPtr<CefBrowser> browser,
             result = handle_nav_reload(browser, req.payload);
         } else if (req.action == ipc::kActionNavStop) {
             result = handle_nav_stop(browser, req.payload);
+        } else if (req.action == ipc::kActionStartVm) {
+            result = handle_start_vm(req.payload);
+        } else if (req.action == ipc::kActionStopVm) {
+            result = handle_stop_vm(req.payload);
+        } else if (req.action == ipc::kActionSubmitSampleToVm) {
+            result = handle_submit_sample_to_vm(req.payload);
         } else {
             callback->Failure(404, ipc::make_error("unknown_action").dump());
             return true;
@@ -408,6 +415,117 @@ json MessageHandler::handle_nav_stop(CefRefPtr<CefBrowser> browser,
                                       const json& /*payload*/) {
     Navigation::stop(browser);
     return ipc::make_success();
+}
+
+json MessageHandler::handle_start_vm(const json& payload) {
+    std::string os = payload.value("os", "alpine");
+
+    VmConfig config;
+    if (os.find("indows") != std::string::npos) {
+        config.platform = VmPlatform::kWindows;
+    } else {
+        config.platform = VmPlatform::kLinux;
+    }
+
+    auto result = vm_manager_->create_vm(config);
+    if (!result.ok()) {
+        return ipc::make_error(result.error().message);
+    }
+
+    std::string vm_id = result.value();
+
+    auto start_result = vm_manager_->start_vm(vm_id);
+    if (!start_result.ok()) {
+        return ipc::make_error(start_result.error().message);
+    }
+
+    if (event_bridge_) {
+        event_bridge_->push_vm_status("booting");
+    }
+
+    auto* vm_mgr = vm_manager_.get();
+    auto* bridge = event_bridge_;
+
+    std::jthread monitor([vm_id, vm_mgr, bridge](std::stop_token stop) {
+        while (!stop.stop_requested()) {
+            VmState state = vm_mgr->get_state(vm_id);
+            if (state == VmState::kReady || state == VmState::kAnalyzing) {
+                if (bridge) bridge->push_vm_status("running");
+                break;
+            }
+            if (state == VmState::kError) {
+                if (bridge) bridge->push_vm_status("error");
+                break;
+            }
+            if (state == VmState::kStopped) {
+                if (bridge) bridge->push_vm_status("idle");
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+    });
+
+    {
+        std::lock_guard<std::mutex> lock(threads_mutex_);
+        analysis_threads_.push_back(std::move(monitor));
+    }
+
+    return ipc::make_success({{"vm_id", vm_id}});
+}
+
+json MessageHandler::handle_stop_vm(const json& payload) {
+    std::string vm_id = payload.value("vm_id", "");
+
+    if (vm_id.empty()) {
+        auto vms = vm_manager_->list_vms();
+        if (!vms.empty()) {
+            vm_id = vms.front().id;
+        }
+    }
+
+    if (vm_id.empty()) {
+        return ipc::make_error("no_active_vm");
+    }
+
+    auto result = vm_manager_->stop_vm(vm_id);
+    if (!result.ok()) {
+        return ipc::make_error(result.error().message);
+    }
+
+    if (event_bridge_) {
+        event_bridge_->push_vm_status("idle");
+    }
+
+    return ipc::make_success();
+}
+
+json MessageHandler::handle_submit_sample_to_vm(const json& payload) {
+    std::string sha256 = payload.value("sha256", "");
+    if (sha256.empty()) {
+        return ipc::make_error("sha256_required");
+    }
+
+    auto file_opt = session_manager_->get_captured_download(sha256);
+    if (!file_opt.has_value()) {
+        return ipc::make_error("download_not_found");
+    }
+
+    auto vms = vm_manager_->list_vms();
+    if (vms.empty()) {
+        return ipc::make_error("no_active_vm");
+    }
+
+    std::string vm_id = vms.front().id;
+    auto result = vm_manager_->submit_sample(vm_id, file_opt.value());
+    if (!result.ok()) {
+        return ipc::make_error(result.error().message);
+    }
+
+    if (event_bridge_) {
+        event_bridge_->push_vm_status("running");
+    }
+
+    return ipc::make_success({{"vm_id", vm_id}});
 }
 
 void MessageHandler::auto_analyze(const std::string& sha256) {

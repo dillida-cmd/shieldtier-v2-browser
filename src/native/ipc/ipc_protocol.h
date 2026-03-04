@@ -22,6 +22,9 @@ inline constexpr const char* kActionNavBack = "nav_back";
 inline constexpr const char* kActionNavForward = "nav_forward";
 inline constexpr const char* kActionNavReload = "nav_reload";
 inline constexpr const char* kActionNavStop = "nav_stop";
+inline constexpr const char* kActionStartVm = "start_vm";
+inline constexpr const char* kActionStopVm = "stop_vm";
+inline constexpr const char* kActionSubmitSampleToVm = "submit_sample_to_vm";
 
 struct IpcRequest {
     std::string action;

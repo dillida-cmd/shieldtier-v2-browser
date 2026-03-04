@@ -28,6 +28,7 @@
 #include "export/export_manager.h"
 #include "ipc/ipc_protocol.h"
 #include "scoring/scoring_engine.h"
+#include "vm/vm_manager.h"
 
 namespace shieldtier {
 
@@ -64,6 +65,9 @@ private:
     json handle_nav_forward(CefRefPtr<CefBrowser> browser, const json& payload);
     json handle_nav_reload(CefRefPtr<CefBrowser> browser, const json& payload);
     json handle_nav_stop(CefRefPtr<CefBrowser> browser, const json& payload);
+    json handle_start_vm(const json& payload);
+    json handle_stop_vm(const json& payload);
+    json handle_submit_sample_to_vm(const json& payload);
 
     SessionManager* session_manager_;
     EventBridge* event_bridge_ = nullptr;
@@ -83,6 +87,7 @@ private:
     std::unique_ptr<CaptureManager> capture_manager_;
     std::unique_ptr<ConfigStore> config_store_;
     std::unique_ptr<ExportManager> export_manager_;
+    std::unique_ptr<VmManager> vm_manager_;
     HarBuilder har_builder_;
 
     std::vector<std::jthread> analysis_threads_;
