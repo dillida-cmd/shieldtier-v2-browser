@@ -4,6 +4,10 @@
 #include "include/cef_app.h"
 #include "include/cef_command_line.h"
 
+#if defined(OS_MAC)
+#include "include/wrapper/cef_library_loader.h"
+#endif
+
 #if defined(OS_WIN)
 #include <windows.h>
 #endif
@@ -19,6 +23,13 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/,
 int main(int argc, char* argv[]) {
     CefMainArgs main_args(argc, argv);
 
+#endif
+
+#if defined(OS_MAC)
+    CefScopedLibraryLoader library_loader;
+    if (!library_loader.LoadInMain()) {
+        return 1;
+    }
 #endif
 
     CefRefPtr<ShieldTierRendererApp> renderer_app(new ShieldTierRendererApp());
@@ -39,16 +50,19 @@ int main(int argc, char* argv[]) {
         "../Frameworks/Chromium Embedded Framework.framework";
 #endif
 
-    CefRefPtr<CefCommandLine> command_line =
-        CefCommandLine::GetGlobalCommandLine();
-    command_line->AppendSwitchWithValue(
-        "force-webrtc-ip-handling-policy", "disable_non_proxied_udp");
-    command_line->AppendSwitch("disable-webrtc-hide-local-ips-with-mdns");
-
     CefRefPtr<ShieldTierApp> app(new ShieldTierApp());
 
     if (!CefInitialize(main_args, settings, app.get(), nullptr)) {
         return 1;
+    }
+
+    // Append WebRTC privacy switches after CEF is initialized
+    CefRefPtr<CefCommandLine> command_line =
+        CefCommandLine::GetGlobalCommandLine();
+    if (command_line) {
+        command_line->AppendSwitchWithValue(
+            "force-webrtc-ip-handling-policy", "disable_non_proxied_udp");
+        command_line->AppendSwitch("disable-webrtc-hide-local-ips-with-mdns");
     }
     CefRunMessageLoop();
     CefShutdown();
