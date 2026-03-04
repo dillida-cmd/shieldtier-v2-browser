@@ -2,6 +2,8 @@
 
 #include <cstring>
 
+#include "common/json.h"
+
 namespace shieldtier {
 
 std::vector<Finding> ShellcodeDetector::scan(const uint8_t* data, size_t size) {

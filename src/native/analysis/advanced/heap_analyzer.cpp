@@ -3,6 +3,8 @@
 #include <cstring>
 #include <unordered_map>
 
+#include "common/json.h"
+
 namespace shieldtier {
 
 std::vector<Finding> HeapAnalyzer::analyze(const uint8_t* data, size_t size) {

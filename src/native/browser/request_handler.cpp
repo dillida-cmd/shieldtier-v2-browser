@@ -181,7 +181,9 @@ bool RequestHandler::OnCertificateError(CefRefPtr<CefBrowser> /*browser*/,
 
 void RequestHandler::OnRenderProcessTerminated(
         CefRefPtr<CefBrowser> browser,
-        TerminationStatus /*status*/) {
+        TerminationStatus /*status*/,
+        int /*error_code*/,
+        const CefString& /*error_string*/) {
     if (message_router_) {
         message_router_->OnRenderProcessTerminated(browser);
     }

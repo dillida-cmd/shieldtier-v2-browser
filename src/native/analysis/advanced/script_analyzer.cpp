@@ -4,6 +4,8 @@
 #include <regex>
 #include <string>
 
+#include "common/json.h"
+
 namespace shieldtier {
 
 namespace {
@@ -234,7 +236,7 @@ std::vector<Finding> ScriptAnalyzer::detect_base64_payload(const std::string& co
     size_t max_len = 0;
     for (auto it = begin; it != end; ++it) {
         ++count;
-        max_len = std::max(max_len, it->length());
+        max_len = std::max(max_len, static_cast<size_t>(it->length()));
     }
 
     if (count > 0) {

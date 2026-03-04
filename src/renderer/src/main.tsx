@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { useStore } from './store';
+import { ipcCall } from './ipc/bridge';
 import './globals.css';
 
 declare global {
@@ -9,6 +10,17 @@ declare global {
     __shieldtier_push?: (event: string, data: unknown) => void;
   }
 }
+
+ipcCall<{ theme?: string; fontSize?: string }>('get_config', { key: 'ui' }).then((prefs) => {
+  if (prefs?.theme) {
+    document.documentElement.setAttribute('data-theme', prefs.theme);
+    useStore.getState().setTheme(prefs.theme as 'dark' | 'light');
+  }
+  if (prefs?.fontSize) {
+    document.documentElement.setAttribute('data-font', prefs.fontSize);
+    useStore.getState().setFontSize(prefs.fontSize as 'sm' | 'md' | 'lg');
+  }
+}).catch(() => {});
 
 window.__shieldtier_push = (event: string, data: unknown) => {
   const store = useStore.getState();
@@ -58,6 +70,15 @@ window.__shieldtier_push = (event: string, data: unknown) => {
       break;
     case 'vm_stats':
       store.setVmStats(d.cpu as number, d.ram as number, d.net as number);
+      break;
+    case 'chat_message':
+      store.addChatMessage(d.contact_id as string, d.message as any);
+      break;
+    case 'chat_presence':
+      store.setChatPresence(d.contact_id as string, d.presence as any);
+      break;
+    case 'chat_status':
+      store.setChatConnectionStatus(d.status as any);
       break;
   }
 };

@@ -2,6 +2,8 @@
 
 #include <algorithm>
 
+#include "common/json.h"
+
 namespace shieldtier {
 
 PeCapability::PeCapability() {

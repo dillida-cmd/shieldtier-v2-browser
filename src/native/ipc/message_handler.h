@@ -22,6 +22,7 @@
 #include "analysis/loganalysis/log_manager.h"
 #include "analysis/threatfeed/threat_feed_manager.h"
 #include "browser/session_manager.h"
+#include "chat/chat_manager.h"
 #include "capture/capture_manager.h"
 #include "capture/har_builder.h"
 #include "config/config_store.h"
@@ -68,6 +69,20 @@ private:
     json handle_start_vm(const json& payload);
     json handle_stop_vm(const json& payload);
     json handle_submit_sample_to_vm(const json& payload);
+    json handle_analyze_email(const json& payload);
+    json handle_analyze_logs(const json& payload);
+    json handle_get_log_results(const json& payload);
+
+    json handle_chat_get_identity(const json& payload);
+    json handle_chat_get_contacts(const json& payload);
+    json handle_chat_add_contact(const json& payload);
+    json handle_chat_approve_contact(const json& payload);
+    json handle_chat_reject_contact(const json& payload);
+    json handle_chat_get_messages(const json& payload);
+    json handle_chat_send_message(const json& payload);
+    json handle_chat_mark_read(const json& payload);
+    json handle_chat_get_status(const json& payload);
+    json handle_chat_set_presence(const json& payload);
 
     SessionManager* session_manager_;
     EventBridge* event_bridge_ = nullptr;
@@ -88,6 +103,7 @@ private:
     std::unique_ptr<ConfigStore> config_store_;
     std::unique_ptr<ExportManager> export_manager_;
     std::unique_ptr<VmManager> vm_manager_;
+    std::unique_ptr<ChatManager> chat_manager_;
     HarBuilder har_builder_;
 
     std::vector<std::jthread> analysis_threads_;

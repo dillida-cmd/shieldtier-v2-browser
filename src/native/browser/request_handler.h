@@ -43,7 +43,9 @@ public:
                             CefRefPtr<CefCallback> callback) override;
 
     void OnRenderProcessTerminated(CefRefPtr<CefBrowser> browser,
-                                    TerminationStatus status) override;
+                                    TerminationStatus status,
+                                    int error_code,
+                                    const CefString& error_string) override;
 
     CefRefPtr<CefResourceRequestHandler> GetResourceRequestHandler(
         CefRefPtr<CefBrowser> browser,

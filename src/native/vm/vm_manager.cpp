@@ -7,6 +7,18 @@
 #include <random>
 #include <thread>
 
+#if !defined(_WIN32)
+#include <spawn.h>
+#include <sys/wait.h>
+#endif
+
+#if defined(__APPLE__)
+#include <crt_externs.h>
+#define environ (*_NSGetEnviron())
+#elif !defined(_WIN32)
+extern char** environ;
+#endif
+
 #include "common/types.h"
 
 namespace shieldtier {

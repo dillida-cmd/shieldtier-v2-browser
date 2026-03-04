@@ -126,7 +126,7 @@ Result<PeInfo> PeAnalyzer::analyze(const FileBuffer& file) {
     std::vector<SectionData> section_data_vec;
 
     peparse::IterSec(
-        pe,
+        pe.get(),
         [](void* cbd, const peparse::VA&, const std::string& name,
            const peparse::image_section_header& header,
            const peparse::bounded_buffer* data) -> int {
@@ -157,7 +157,7 @@ Result<PeInfo> PeAnalyzer::analyze(const FileBuffer& file) {
     std::vector<PeImport> import_vec;
 
     peparse::IterImpVAString(
-        pe,
+        pe.get(),
         [](void* cbd, const peparse::VA&, const std::string& module,
            const std::string& function) -> int {
             auto* vec = static_cast<std::vector<PeImport>*>(cbd);

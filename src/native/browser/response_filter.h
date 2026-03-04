@@ -29,6 +29,7 @@ class DownloadCaptureFilter : public CefResponseFilter {
 public:
     DownloadCaptureFilter(const std::string& url, const std::string& mime_type,
                           FilterCompleteCallback on_complete = nullptr);
+    ~DownloadCaptureFilter() override;
 
     bool InitFilter() override;
     FilterStatus Filter(void* data_in, size_t data_in_size,
@@ -63,6 +64,7 @@ private:
 class StreamingHashFilter : public CefResponseFilter {
 public:
     StreamingHashFilter(const std::string& url, const std::string& mime_type);
+    ~StreamingHashFilter() override;
 
     bool InitFilter() override;
     FilterStatus Filter(void* data_in, size_t data_in_size,

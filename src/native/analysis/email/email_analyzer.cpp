@@ -239,7 +239,7 @@ std::string decode_quoted_printable(const std::string& input) {
 // Extract boundary from Content-Type header value
 std::string extract_boundary(const std::string& content_type) {
     static const std::regex boundary_re(
-        R"(boundary\s*=\s*"?([^";\s]+)"?)", std::regex::icase);
+        R"re(boundary\s*=\s*"?([^";\s]+)"?)re", std::regex::icase);
     std::smatch match;
     if (std::regex_search(content_type, match, boundary_re)) {
         return match[1].str();
@@ -280,7 +280,7 @@ const std::regex& url_regex() {
 }
 
 const std::regex& href_regex() {
-    static const std::regex re(R"(href\s*=\s*"(https?://[^"]+)")", std::regex::icase);
+    static const std::regex re(R"re(href\s*=\s*"(https?://[^"]+)")re", std::regex::icase);
     return re;
 }
 
@@ -1011,7 +1011,7 @@ std::vector<Finding> EmailAnalyzer::analyze_body(const ParsedEmail& email) {
 
         // External form actions
         static const std::regex form_action_re(
-            R"(<form[^>]+action\s*=\s*"(https?://[^"]+)")",
+            R"re(<form[^>]+action\s*=\s*"(https?://[^"]+)")re",
             std::regex::icase);
         std::smatch form_match;
         if (std::regex_search(email.body_html, form_match, form_action_re)) {

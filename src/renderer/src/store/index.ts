@@ -19,6 +19,10 @@ export type BottomTab =
   | 'sandbox' | 'findings' | 'mitre'
   | 'activity' | 'timeline' | 'process';
 
+export type ModalState = 'none' | 'command' | 'settings' | 'export' | 'caseName';
+export type ThemeMode = 'dark' | 'light';
+export type FontSize = 'sm' | 'md' | 'lg';
+
 interface PresetConfig {
   topLeft: TopLeftTab;
   vmCollapsed: boolean;
@@ -70,6 +74,21 @@ interface ShieldTierState {
   vmRamMb: number;
   vmNetKbps: number;
 
+  chatIdentity: { sessionId: string; publicKey: string } | null;
+  chatContacts: Array<{ id: string; name: string; status: string; unread: number }>;
+  chatMessages: Record<string, Array<{ id: string; from: string; text: string; timestamp: number; read: boolean }>>;
+  chatPresence: Record<string, 'online' | 'offline' | 'away'>;
+  chatConnectionStatus: 'connected' | 'disconnected' | 'connecting';
+  chatActiveContact: string | null;
+
+  modalState: ModalState;
+  theme: ThemeMode;
+  fontSize: FontSize;
+
+  setModalState: (state: ModalState) => void;
+  setTheme: (theme: ThemeMode) => void;
+  setFontSize: (size: FontSize) => void;
+  setCaseInfo: (id: string, name: string) => void;
   setPreset: (preset: LayoutPreset) => void;
   setTopSplit: (ratio: number) => void;
   setMainSplit: (ratio: number) => void;
@@ -91,6 +110,13 @@ interface ShieldTierState {
   addCapturedFile: (file: FileEntry) => void;
   setCapturedFiles: (files: FileEntry[]) => void;
   setVmStats: (cpu: number, ram: number, net: number) => void;
+
+  setChatIdentity: (identity: { sessionId: string; publicKey: string } | null) => void;
+  setChatContacts: (contacts: Array<{ id: string; name: string; status: string; unread: number }>) => void;
+  addChatMessage: (contactId: string, message: { id: string; from: string; text: string; timestamp: number; read: boolean }) => void;
+  setChatPresence: (contactId: string, presence: 'online' | 'offline' | 'away') => void;
+  setChatConnectionStatus: (status: 'connected' | 'disconnected' | 'connecting') => void;
+  setChatActiveContact: (contactId: string | null) => void;
 }
 
 export const useStore = create<ShieldTierState>()((set) => ({
@@ -131,6 +157,21 @@ export const useStore = create<ShieldTierState>()((set) => ({
   vmRamMb: 0,
   vmNetKbps: 0,
 
+  chatIdentity: null,
+  chatContacts: [],
+  chatMessages: {},
+  chatPresence: {},
+  chatConnectionStatus: 'disconnected',
+  chatActiveContact: null,
+
+  modalState: 'none',
+  theme: 'dark',
+  fontSize: 'md',
+
+  setModalState: (modalState) => set({ modalState }),
+  setTheme: (theme) => set({ theme }),
+  setFontSize: (fontSize) => set({ fontSize }),
+  setCaseInfo: (caseId, caseName) => set({ caseId, caseName }),
   setPreset: (preset) => {
     const config = PRESET_CONFIGS[preset];
     set({
@@ -175,4 +216,18 @@ export const useStore = create<ShieldTierState>()((set) => ({
   addCapturedFile: (file) => set((s) => ({ capturedFiles: [...s.capturedFiles, file] })),
   setCapturedFiles: (capturedFiles) => set({ capturedFiles }),
   setVmStats: (vmCpuPct, vmRamMb, vmNetKbps) => set({ vmCpuPct, vmRamMb, vmNetKbps }),
+
+  setChatIdentity: (chatIdentity) => set({ chatIdentity }),
+  setChatContacts: (chatContacts) => set({ chatContacts }),
+  addChatMessage: (contactId, message) => set((s) => ({
+    chatMessages: {
+      ...s.chatMessages,
+      [contactId]: [...(s.chatMessages[contactId] ?? []), message],
+    },
+  })),
+  setChatPresence: (contactId, presence) => set((s) => ({
+    chatPresence: { ...s.chatPresence, [contactId]: presence },
+  })),
+  setChatConnectionStatus: (chatConnectionStatus) => set({ chatConnectionStatus }),
+  setChatActiveContact: (chatActiveContact) => set({ chatActiveContact }),
 }));

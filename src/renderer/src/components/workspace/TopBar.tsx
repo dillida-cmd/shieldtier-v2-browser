@@ -4,7 +4,7 @@ import { useStore } from '../../store';
 import { Tooltip, TooltipTrigger, TooltipContent } from '../ui/Tooltip';
 
 export function TopBar() {
-  const { caseId, caseName, capturing, analysisStatus, analysisResult, currentDownload } = useStore();
+  const { caseId, caseName, capturing, analysisStatus, analysisResult, currentDownload, setModalState } = useStore();
 
   const verdictSeverity = analysisResult?.verdict?.severity ?? null;
   const verdictLabel = analysisResult?.verdict?.label ?? null;
@@ -23,7 +23,10 @@ export function TopBar() {
 
       <div className="w-px h-5 bg-[var(--st-border)]" />
 
-      <div className="flex items-center gap-2 min-w-0">
+      <button
+        onClick={() => setModalState('caseName')}
+        className="flex items-center gap-2 min-w-0 hover:opacity-80 transition-opacity cursor-pointer bg-transparent border-none p-0"
+      >
         {caseId ? (
           <span className="text-[var(--st-accent)] text-[11px] font-mono font-bold flex-shrink-0">
             {caseId}
@@ -36,7 +39,7 @@ export function TopBar() {
             {caseName}
           </span>
         )}
-      </div>
+      </button>
 
       <div className="flex-1" />
 
@@ -70,6 +73,21 @@ export function TopBar() {
           <TooltipContent>Network capture active</TooltipContent>
         </Tooltip>
       )}
+
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            onClick={() => setModalState('settings')}
+            className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded hover:bg-[var(--st-bg-hover)] transition-colors cursor-pointer bg-transparent border-none"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--st-text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
+            </svg>
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>Settings (Cmd+,)</TooltipContent>
+      </Tooltip>
 
       {analysisStatus === 'pending' ? (
         <div className="flex items-center gap-1.5 flex-shrink-0">

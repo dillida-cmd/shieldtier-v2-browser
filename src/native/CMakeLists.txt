@@ -49,6 +49,14 @@ set(SHIELDTIER_SOURCES
     vm/anti_evasion.cpp
     vm/vm_protocol.cpp
     vm/vm_scoring.cpp
+    security/anti_debug.cpp
+    security/integrity_guard.cpp
+    security/encrypted_pages.cpp
+    security/rule_crypto.cpp
+    security/hardware_fingerprint.cpp
+    security/license_manager.cpp
+    cloud/cloud_client.cpp
+    cloud/rule_sync.cpp
 )
 
 add_executable(shieldtier ${SHIELDTIER_SOURCES})
@@ -57,6 +65,8 @@ target_include_directories(shieldtier PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/src/native/common
     ${CEF_INCLUDE_DIRS}
+    ${CMAKE_SOURCE_DIR}/third_party/libarchive/libarchive
+    ${CMAKE_BINARY_DIR}  # for libarchive config.h
 )
 
 target_link_libraries(shieldtier PRIVATE
@@ -66,9 +76,17 @@ target_link_libraries(shieldtier PRIVATE
     yara
     pe-parse
     CURL::libcurl
-    LibArchive::LibArchive
+    archive_static
     sodium
 )
+
+if(APPLE)
+    target_link_libraries(shieldtier PRIVATE
+        "-framework IOKit"
+        "-framework CoreFoundation"
+        "-framework Security"
+    )
+endif()
 
 # ---------------------------------------------------------------------------
 # macOS bundle

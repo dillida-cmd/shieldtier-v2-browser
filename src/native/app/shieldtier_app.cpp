@@ -13,8 +13,8 @@ void ShieldTierApp::OnRegisterCustomSchemes(
         CefRawPtr<CefSchemeRegistrar> registrar) {
     registrar->AddCustomScheme(
         "shieldtier",
-        CEF_SCHEME_IS_STANDARD | CEF_SCHEME_IS_SECURE |
-        CEF_SCHEME_IS_CORS_ENABLED | CEF_SCHEME_IS_FETCH_ENABLED);
+        CEF_SCHEME_OPTION_STANDARD | CEF_SCHEME_OPTION_SECURE |
+        CEF_SCHEME_OPTION_CORS_ENABLED | CEF_SCHEME_OPTION_FETCH_ENABLED);
 }
 
 void ShieldTierApp::OnContextInitialized() {

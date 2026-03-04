@@ -194,6 +194,8 @@ DownloadCaptureFilter::DownloadCaptureFilter(const std::string& url,
                                              FilterCompleteCallback on_complete)
     : url_(url), mime_type_(mime_type), on_complete_(std::move(on_complete)) {}
 
+DownloadCaptureFilter::~DownloadCaptureFilter() = default;
+
 bool DownloadCaptureFilter::InitFilter() {
     hasher_ = std::make_unique<HasherImpl>();
     buffer_.reserve(1024 * 1024);
@@ -255,6 +257,8 @@ struct StreamingHashFilter::HasherImpl {
 StreamingHashFilter::StreamingHashFilter(const std::string& url,
                                          const std::string& mime_type)
     : url_(url), mime_type_(mime_type) {}
+
+StreamingHashFilter::~StreamingHashFilter() = default;
 
 bool StreamingHashFilter::InitFilter() {
     hasher_ = std::make_unique<HasherImpl>();

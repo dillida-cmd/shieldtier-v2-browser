@@ -4,6 +4,7 @@
 
 #include "analysis/fileanalysis/file_analyzer.h"
 #include "browser/navigation.h"
+#include "chat/shieldcrypt.h"
 
 namespace shieldtier {
 
@@ -22,7 +23,9 @@ MessageHandler::MessageHandler(SessionManager* session_manager)
       capture_manager_(std::make_unique<CaptureManager>()),
       config_store_(std::make_unique<ConfigStore>("shieldtier.json")),
       export_manager_(std::make_unique<ExportManager>()),
-      vm_manager_(std::make_unique<VmManager>("/tmp/shieldtier/vms")) {
+      vm_manager_(std::make_unique<VmManager>("/tmp/shieldtier/vms")),
+      chat_manager_(std::make_unique<ChatManager>("/tmp/shieldtier/chat")) {
+    chat_manager_->initialize_keys();
     yara_engine_->initialize();
     config_store_->load();
     threat_feed_manager_->update_feeds();
@@ -82,6 +85,32 @@ bool MessageHandler::OnQuery(CefRefPtr<CefBrowser> browser,
             result = handle_stop_vm(req.payload);
         } else if (req.action == ipc::kActionSubmitSampleToVm) {
             result = handle_submit_sample_to_vm(req.payload);
+        } else if (req.action == ipc::kActionAnalyzeEmail) {
+            result = handle_analyze_email(req.payload);
+        } else if (req.action == ipc::kActionAnalyzeLogs) {
+            result = handle_analyze_logs(req.payload);
+        } else if (req.action == ipc::kActionGetLogResults) {
+            result = handle_get_log_results(req.payload);
+        } else if (req.action == ipc::kActionChatGetIdentity) {
+            result = handle_chat_get_identity(req.payload);
+        } else if (req.action == ipc::kActionChatGetContacts) {
+            result = handle_chat_get_contacts(req.payload);
+        } else if (req.action == ipc::kActionChatAddContact) {
+            result = handle_chat_add_contact(req.payload);
+        } else if (req.action == ipc::kActionChatApproveContact) {
+            result = handle_chat_approve_contact(req.payload);
+        } else if (req.action == ipc::kActionChatRejectContact) {
+            result = handle_chat_reject_contact(req.payload);
+        } else if (req.action == ipc::kActionChatGetMessages) {
+            result = handle_chat_get_messages(req.payload);
+        } else if (req.action == ipc::kActionChatSendMessage) {
+            result = handle_chat_send_message(req.payload);
+        } else if (req.action == ipc::kActionChatMarkRead) {
+            result = handle_chat_mark_read(req.payload);
+        } else if (req.action == ipc::kActionChatGetStatus) {
+            result = handle_chat_get_status(req.payload);
+        } else if (req.action == ipc::kActionChatSetPresence) {
+            result = handle_chat_set_presence(req.payload);
         } else {
             callback->Failure(404, ipc::make_error("unknown_action").dump());
             return true;
@@ -331,14 +360,11 @@ json MessageHandler::handle_export_report(const json& payload) {
 
     ThreatVerdict verdict = verdict_data.get<ThreatVerdict>();
 
-    Result<std::string> result;
-    if (format == "html") {
-        result = export_manager_->export_html(verdict, sha256);
-    } else if (format == "zip") {
-        result = export_manager_->export_zip(verdict, sha256, output_dir);
-    } else {
-        result = export_manager_->export_json(verdict, sha256);
-    }
+    Result<std::string> result = (format == "html")
+        ? export_manager_->export_html(verdict, sha256)
+        : (format == "zip")
+            ? export_manager_->export_zip(verdict, sha256, output_dir)
+            : export_manager_->export_json(verdict, sha256);
 
     if (!result.ok()) {
         return ipc::make_error(result.error().message);
@@ -526,6 +552,226 @@ json MessageHandler::handle_submit_sample_to_vm(const json& payload) {
     }
 
     return ipc::make_success({{"vm_id", vm_id}});
+}
+
+json MessageHandler::handle_analyze_email(const json& payload) {
+    std::string sha256 = payload.value("sha256", "");
+    if (sha256.empty()) {
+        return ipc::make_error("sha256_required");
+    }
+
+    auto file_opt = session_manager_->get_captured_download(sha256);
+    if (!file_opt.has_value()) {
+        return ipc::make_error("download_not_found");
+    }
+
+    auto result = email_analyzer_->analyze(file_opt.value());
+    if (!result.ok()) {
+        return ipc::make_error(result.error().message);
+    }
+
+    auto& r = result.value();
+    json findings_json = json::array();
+    for (const auto& f : r.findings) {
+        findings_json.push_back({
+            {"title", f.title}, {"description", f.description},
+            {"severity", f.severity}, {"engine", f.engine}, {"metadata", f.metadata}
+        });
+    }
+
+    return ipc::make_success({
+        {"engine", "email"},
+        {"findings", findings_json},
+        {"duration_ms", r.duration_ms},
+        {"raw_output", r.raw_output}
+    });
+}
+
+json MessageHandler::handle_analyze_logs(const json& payload) {
+    std::string sha256 = payload.value("sha256", "");
+    if (sha256.empty()) {
+        return ipc::make_error("sha256_required");
+    }
+
+    auto file_opt = session_manager_->get_captured_download(sha256);
+    if (!file_opt.has_value()) {
+        return ipc::make_error("download_not_found");
+    }
+
+    auto result = log_manager_->analyze(file_opt.value());
+    if (!result.ok()) {
+        return ipc::make_error(result.error().message);
+    }
+
+    auto& r = result.value();
+    json findings_json = json::array();
+    for (const auto& f : r.findings) {
+        findings_json.push_back({
+            {"title", f.title}, {"description", f.description},
+            {"severity", f.severity}, {"engine", f.engine}, {"metadata", f.metadata}
+        });
+    }
+
+    return ipc::make_success({
+        {"engine", "loganalysis"},
+        {"findings", findings_json},
+        {"duration_ms", r.duration_ms},
+        {"raw_output", r.raw_output}
+    });
+}
+
+json MessageHandler::handle_get_log_results(const json& payload) {
+    std::string sha256 = payload.value("sha256", "");
+    if (sha256.empty()) {
+        return ipc::make_error("sha256_required");
+    }
+
+    auto file_opt = session_manager_->get_captured_download(sha256);
+    if (!file_opt.has_value()) {
+        return ipc::make_error("download_not_found");
+    }
+
+    const auto& file = file_opt.value();
+    auto format = log_manager_->detect_format(file.ptr(), file.size());
+    auto events = log_manager_->parse(file.ptr(), file.size(), format);
+    if (!events.ok()) {
+        return ipc::make_error(events.error().message);
+    }
+
+    json events_json = json::array();
+    for (const auto& evt : events.value()) {
+        events_json.push_back({
+            {"timestamp", evt.timestamp}, {"source", evt.source},
+            {"event_type", evt.event_type}, {"severity", evt.severity},
+            {"message", evt.message}, {"fields", evt.fields}
+        });
+    }
+
+    return ipc::make_success({{"events", events_json}, {"count", events_json.size()}});
+}
+
+json MessageHandler::handle_chat_get_identity(const json& /*payload*/) {
+    auto pubkey = chat_manager_->get_public_key();
+    auto pubkey_b64 = ShieldCrypt::encode_base64(pubkey);
+    return ipc::make_success({
+        {"session_id", pubkey_b64.substr(0, 16)},
+        {"public_key", pubkey_b64}
+    });
+}
+
+json MessageHandler::handle_chat_get_contacts(const json& /*payload*/) {
+    // Contacts are managed server-side; return local chat history senders
+    auto history = chat_manager_->get_history(1000);
+    std::unordered_map<std::string, int> contact_map;
+    for (const auto& msg : history) {
+        if (msg.sender_id != "self") {
+            contact_map[msg.sender_id]++;
+        }
+    }
+
+    json contacts = json::array();
+    for (const auto& [id, count] : contact_map) {
+        contacts.push_back({
+            {"id", id},
+            {"name", id},
+            {"status", "offline"},
+            {"unread", 0}
+        });
+    }
+    return ipc::make_success({{"contacts", contacts}});
+}
+
+json MessageHandler::handle_chat_add_contact(const json& payload) {
+    std::string contact_id = payload.value("contact_id", "");
+    std::string public_key = payload.value("public_key", "");
+    if (contact_id.empty() || public_key.empty()) {
+        return ipc::make_error("contact_id_and_public_key_required");
+    }
+    return ipc::make_success({{"contact_id", contact_id}, {"status", "pending"}});
+}
+
+json MessageHandler::handle_chat_approve_contact(const json& payload) {
+    std::string contact_id = payload.value("contact_id", "");
+    if (contact_id.empty()) {
+        return ipc::make_error("contact_id_required");
+    }
+    return ipc::make_success({{"contact_id", contact_id}, {"status", "approved"}});
+}
+
+json MessageHandler::handle_chat_reject_contact(const json& payload) {
+    std::string contact_id = payload.value("contact_id", "");
+    if (contact_id.empty()) {
+        return ipc::make_error("contact_id_required");
+    }
+    return ipc::make_success({{"contact_id", contact_id}, {"status", "rejected"}});
+}
+
+json MessageHandler::handle_chat_get_messages(const json& payload) {
+    int limit = payload.value("limit", 100);
+    std::string contact_id = payload.value("contact_id", "");
+
+    auto history = chat_manager_->get_history(limit);
+
+    json messages = json::array();
+    for (const auto& msg : history) {
+        if (!contact_id.empty() && msg.sender_id != contact_id && msg.sender_id != "self") {
+            continue;
+        }
+        messages.push_back({
+            {"id", msg.id},
+            {"from", msg.sender_id},
+            {"text", msg.content},
+            {"timestamp", msg.timestamp},
+            {"read", true}
+        });
+    }
+    return ipc::make_success({{"messages", messages}});
+}
+
+json MessageHandler::handle_chat_send_message(const json& payload) {
+    std::string text = payload.value("text", "");
+    std::string recipient_key_b64 = payload.value("recipient_key", "");
+
+    if (text.empty()) {
+        return ipc::make_error("text_required");
+    }
+    if (recipient_key_b64.empty()) {
+        return ipc::make_error("recipient_key_required");
+    }
+
+    auto key_result = ShieldCrypt::decode_base64(recipient_key_b64);
+    if (!key_result.ok()) {
+        return ipc::make_error("invalid_recipient_key");
+    }
+
+    auto send_result = chat_manager_->send_message(text, key_result.value());
+    if (!send_result.ok()) {
+        return ipc::make_error(send_result.error().message);
+    }
+
+    auto& encrypted = send_result.value();
+    return ipc::make_success({
+        {"sent", true},
+        {"ciphertext_b64", ShieldCrypt::encode_base64(encrypted.ciphertext)},
+        {"nonce_b64", ShieldCrypt::encode_base64(encrypted.nonce)}
+    });
+}
+
+json MessageHandler::handle_chat_mark_read(const json& payload) {
+    std::string contact_id = payload.value("contact_id", "");
+    if (contact_id.empty()) {
+        return ipc::make_error("contact_id_required");
+    }
+    return ipc::make_success({{"contact_id", contact_id}, {"marked", true}});
+}
+
+json MessageHandler::handle_chat_get_status(const json& /*payload*/) {
+    return ipc::make_success({{"status", "connected"}});
+}
+
+json MessageHandler::handle_chat_set_presence(const json& payload) {
+    std::string presence = payload.value("presence", "online");
+    return ipc::make_success({{"presence", presence}});
 }
 
 void MessageHandler::auto_analyze(const std::string& sha256) {

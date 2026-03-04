@@ -13,6 +13,11 @@ function severityToThreat(severity?: SeverityLevel): ThreatLevel {
 
 export function useThreatLevel() {
   const severity = useStore((s) => s.analysisResult?.verdict?.severity);
+  const theme = useStore((s) => s.theme);
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]);
 
   useEffect(() => {
     const level = severityToThreat(severity);

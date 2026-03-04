@@ -25,6 +25,20 @@ inline constexpr const char* kActionNavStop = "nav_stop";
 inline constexpr const char* kActionStartVm = "start_vm";
 inline constexpr const char* kActionStopVm = "stop_vm";
 inline constexpr const char* kActionSubmitSampleToVm = "submit_sample_to_vm";
+inline constexpr const char* kActionAnalyzeEmail = "analyze_email";
+inline constexpr const char* kActionAnalyzeLogs = "analyze_logs";
+inline constexpr const char* kActionGetLogResults = "get_log_results";
+
+inline constexpr const char* kActionChatGetIdentity = "chat_get_identity";
+inline constexpr const char* kActionChatGetContacts = "chat_get_contacts";
+inline constexpr const char* kActionChatAddContact = "chat_add_contact";
+inline constexpr const char* kActionChatApproveContact = "chat_approve_contact";
+inline constexpr const char* kActionChatRejectContact = "chat_reject_contact";
+inline constexpr const char* kActionChatGetMessages = "chat_get_messages";
+inline constexpr const char* kActionChatSendMessage = "chat_send_message";
+inline constexpr const char* kActionChatMarkRead = "chat_mark_read";
+inline constexpr const char* kActionChatGetStatus = "chat_get_status";
+inline constexpr const char* kActionChatSetPresence = "chat_set_presence";
 
 struct IpcRequest {
     std::string action;

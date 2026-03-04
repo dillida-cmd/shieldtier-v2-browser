@@ -98,13 +98,13 @@ const std::regex& tracking_pixel_regex() {
 
 const std::regex& external_script_regex() {
     static const std::regex re(
-        R"(<script[^>]+src\s*=\s*"(https?://[^"]+)")", std::regex::icase);
+        R"re(<script[^>]+src\s*=\s*"(https?://[^"]+)")re", std::regex::icase);
     return re;
 }
 
 const std::regex& hidden_iframe_regex() {
     static const std::regex re(
-        R"(<iframe[^>]+(?:display\s*:\s*none|width\s*=\s*"?0"?|height\s*=\s*"?0"?))",
+        R"re(<iframe[^>]+(?:display\s*:\s*none|width\s*=\s*"?0"?|height\s*=\s*"?0"?))re",
         std::regex::icase);
     return re;
 }
@@ -570,7 +570,7 @@ bool ContentAnalyzer::detect_drive_by_download(const std::string& html) {
     // Hidden iframe with download-related src
     if (std::regex_search(html, hidden_iframe_regex())) {
         static const std::regex iframe_src_re(
-            R"(<iframe[^>]+src\s*=\s*"([^"]+)")", std::regex::icase);
+            R"re(<iframe[^>]+src\s*=\s*"([^"]+)")re", std::regex::icase);
         std::smatch m;
         auto it = html.cbegin();
         while (std::regex_search(it, html.cend(), m, iframe_src_re)) {

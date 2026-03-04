@@ -4,7 +4,9 @@
 #include <string>
 #include <unordered_map>
 
+#include "common/json.h"
 #include "common/result.h"
+#include "common/types.h"
 #include "vm/vm_types.h"
 #include "vm/qemu_launcher.h"
 

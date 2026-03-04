@@ -9,6 +9,7 @@
 #include "analysis/advanced/pe_capability.h"
 #include "analysis/advanced/script_analyzer.h"
 #include "analysis/advanced/shellcode_detector.h"
+#include "common/json.h"
 
 namespace shieldtier {
 
