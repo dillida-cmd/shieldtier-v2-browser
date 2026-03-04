@@ -67,6 +67,14 @@ bool MessageHandler::OnQuery(CefRefPtr<CefBrowser> browser,
             result = handle_stop_capture(req.payload);
         } else if (req.action == ipc::kActionGetCapture) {
             result = handle_get_capture(req.payload);
+        } else if (req.action == ipc::kActionNavBack) {
+            result = handle_nav_back(browser, req.payload);
+        } else if (req.action == ipc::kActionNavForward) {
+            result = handle_nav_forward(browser, req.payload);
+        } else if (req.action == ipc::kActionNavReload) {
+            result = handle_nav_reload(browser, req.payload);
+        } else if (req.action == ipc::kActionNavStop) {
+            result = handle_nav_stop(browser, req.payload);
         } else {
             callback->Failure(404, ipc::make_error("unknown_action").dump());
             return true;
@@ -376,6 +384,30 @@ json MessageHandler::handle_get_capture(const json& payload) {
         {"request_count", requests.size()},
         {"har", har}
     });
+}
+
+json MessageHandler::handle_nav_back(CefRefPtr<CefBrowser> browser,
+                                      const json& /*payload*/) {
+    Navigation::go_back(browser);
+    return ipc::make_success();
+}
+
+json MessageHandler::handle_nav_forward(CefRefPtr<CefBrowser> browser,
+                                         const json& /*payload*/) {
+    Navigation::go_forward(browser);
+    return ipc::make_success();
+}
+
+json MessageHandler::handle_nav_reload(CefRefPtr<CefBrowser> browser,
+                                        const json& /*payload*/) {
+    Navigation::reload(browser);
+    return ipc::make_success();
+}
+
+json MessageHandler::handle_nav_stop(CefRefPtr<CefBrowser> browser,
+                                      const json& /*payload*/) {
+    Navigation::stop(browser);
+    return ipc::make_success();
 }
 
 void MessageHandler::auto_analyze(const std::string& sha256) {

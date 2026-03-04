@@ -18,6 +18,10 @@ inline constexpr const char* kActionGetThreatFeeds = "get_threat_feeds";
 inline constexpr const char* kActionStartCapture = "start_capture";
 inline constexpr const char* kActionStopCapture = "stop_capture";
 inline constexpr const char* kActionGetCapture = "get_capture";
+inline constexpr const char* kActionNavBack = "nav_back";
+inline constexpr const char* kActionNavForward = "nav_forward";
+inline constexpr const char* kActionNavReload = "nav_reload";
+inline constexpr const char* kActionNavStop = "nav_stop";
 
 struct IpcRequest {
     std::string action;

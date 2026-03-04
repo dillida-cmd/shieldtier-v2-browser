@@ -60,6 +60,10 @@ private:
     json handle_start_capture(const json& payload);
     json handle_stop_capture(const json& payload);
     json handle_get_capture(const json& payload);
+    json handle_nav_back(CefRefPtr<CefBrowser> browser, const json& payload);
+    json handle_nav_forward(CefRefPtr<CefBrowser> browser, const json& payload);
+    json handle_nav_reload(CefRefPtr<CefBrowser> browser, const json& payload);
+    json handle_nav_stop(CefRefPtr<CefBrowser> browser, const json& payload);
 
     SessionManager* session_manager_;
     EventBridge* event_bridge_ = nullptr;
