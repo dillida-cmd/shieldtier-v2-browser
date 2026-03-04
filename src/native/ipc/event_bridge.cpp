@@ -42,8 +42,19 @@ void EventBridge::push(const std::string& event, const json& data) {
     }
     if (!browser) return;
 
+    std::string payload = data.dump();
+    // Escape U+2028/U+2029 — valid in JSON but line terminators in JavaScript
+    for (size_t pos = 0; pos < payload.size(); ++pos) {
+        if (payload[pos] == '\xe2' && pos + 2 < payload.size() &&
+            payload[pos + 1] == '\x80' &&
+            (payload[pos + 2] == '\xa8' || payload[pos + 2] == '\xa9')) {
+            std::string esc = payload[pos + 2] == '\xa8' ? "\\u2028" : "\\u2029";
+            payload.replace(pos, 3, esc);
+            pos += 5;
+        }
+    }
     std::string js = "window.__shieldtier_push&&window.__shieldtier_push('"
-        + event + "'," + data.dump() + ")";
+        + event + "'," + payload + ")";
 
     if (CefCurrentlyOn(TID_UI)) {
         auto frame = browser->GetMainFrame();

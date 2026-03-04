@@ -33,6 +33,15 @@ bool SchemeHandler::Open(CefRefPtr<CefRequest> request, bool& handle_request,
 
     fs::path file_path = fs::path(root_dir_) / path.substr(1);
 
+    // Canonicalize and verify the resolved path is within root_dir_
+    std::error_code ec;
+    fs::path canonical_root = fs::weakly_canonical(root_dir_, ec);
+    fs::path canonical_file = fs::weakly_canonical(file_path, ec);
+    if (!canonical_file.string().starts_with(canonical_root.string())) {
+        status_code_ = 403;
+        return true;
+    }
+
     if (!fs::exists(file_path) || !fs::is_regular_file(file_path)) {
         file_path = fs::path(root_dir_) / "index.html";
         if (!fs::exists(file_path)) {
@@ -64,7 +73,6 @@ void SchemeHandler::GetResponseHeaders(CefRefPtr<CefResponse> response,
     response->SetMimeType(mime_type_);
 
     if (status_code_ == 200) {
-        response->SetHeaderByName("Access-Control-Allow-Origin", "*", true);
         response_length = static_cast<int64_t>(data_.size());
     } else {
         response_length = 0;
@@ -93,7 +101,7 @@ void SchemeHandler::Cancel() {
 
 std::string SchemeHandler::get_mime_type(const std::string& ext) {
     if (ext == ".html") return "text/html";
-    if (ext == ".js")   return "application/javascript";
+    if (ext == ".js" || ext == ".mjs") return "application/javascript";
     if (ext == ".css")  return "text/css";
     if (ext == ".json") return "application/json";
     if (ext == ".svg")  return "image/svg+xml";

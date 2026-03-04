@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Badge } from '../common/Badge';
 import { ipcCall } from '../../ipc/bridge';
 import { useStore } from '../../store';
@@ -36,6 +36,8 @@ export function BrowserZone() {
       ipcCall('nav_reload');
     }
   }, [navIsLoading]);
+
+  useEffect(() => { setUrlInput(''); }, [navCurrentUrl]);
 
   const displayUrl = urlInput || navCurrentUrl;
 

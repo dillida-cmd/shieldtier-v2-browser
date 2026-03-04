@@ -69,8 +69,8 @@ private:
     CefRefPtr<shieldtier::DownloadHandler> download_handler_;
     std::unique_ptr<shieldtier::SessionManager> session_manager_;
     CefRefPtr<CefMessageRouterBrowserSide> message_router_;
-    std::unique_ptr<shieldtier::MessageHandler> message_handler_;
     std::unique_ptr<shieldtier::EventBridge> event_bridge_;
+    std::unique_ptr<shieldtier::MessageHandler> message_handler_;
 
     CefRefPtr<CefBrowser> browser_;
     int browser_count_ = 0;
