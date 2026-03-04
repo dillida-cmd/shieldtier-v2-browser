@@ -50,6 +50,15 @@ window.__shieldtier_push = (event: string, data: unknown) => {
     case 'navigation_state':
       store.setNavState(d as unknown as Parameters<typeof store.setNavState>[0]);
       break;
+    case 'screenshot':
+      store.addScreenshot(d.url as string);
+      break;
+    case 'captured_file':
+      store.addCapturedFile(d as unknown as Parameters<typeof store.addCapturedFile>[0]);
+      break;
+    case 'vm_stats':
+      store.setVmStats(d.cpu as number, d.ram as number, d.net as number);
+      break;
   }
 };
 

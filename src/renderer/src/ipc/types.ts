@@ -107,3 +107,12 @@ export interface DownloadInfo {
   filename: string;
   size: number;
 }
+
+export interface FileEntry {
+  filename: string;
+  sha256: string;
+  size: number;
+  mimeType: string;
+  path: string;
+  severity?: SeverityLevel;
+}

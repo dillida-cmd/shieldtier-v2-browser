@@ -32,7 +32,7 @@ export function DataTable<T>({ columns, data, keyFn, onRowClick, emptyMessage }:
             {columns.map((col) => (
               <th
                 key={col.key}
-                className="text-left text-[9px] font-bold uppercase tracking-wider text-[var(--st-text-muted)] px-2 py-1.5 border-b border-[var(--st-border)]"
+                className="text-left text-[10px] font-bold uppercase tracking-wider text-[var(--st-text-muted)] px-2 py-1.5 border-b border-[var(--st-border)]"
                 style={col.width ? { width: col.width } : undefined}
               >
                 {col.label}

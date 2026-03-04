@@ -5,7 +5,7 @@ import type { AnalysisResult } from '../ipc/types';
 
 export function useAnalysisPolling(intervalMs = 2000) {
   const { currentSha256, analysisStatus, setAnalysis } = useStore();
-  const timerRef = useRef<ReturnType<typeof setInterval>>();
+  const timerRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
 
   useEffect(() => {
     if (!currentSha256 || analysisStatus === 'complete' || analysisStatus === 'error') {

@@ -16,20 +16,20 @@ export function WorkspaceRoot() {
     const container = containerRef.current;
     if (!container) return;
     const totalHeight = container.clientHeight - 40;
-    setMainSplit(mainSplit + deltaY / totalHeight);
-  }, [mainSplit, setMainSplit]);
+    setMainSplit(useStore.getState().mainSplit + deltaY / totalHeight);
+  }, [setMainSplit]);
 
   const onVSplitterDrag = useCallback((deltaX: number) => {
     const container = containerRef.current;
     if (!container) return;
     const totalWidth = container.clientWidth - 52;
-    setTopSplit(topSplit + deltaX / totalWidth);
-  }, [topSplit, setTopSplit]);
+    setTopSplit(useStore.getState().topSplit + deltaX / totalWidth);
+  }, [setTopSplit]);
 
-  const topPct = `${mainSplit * 100}%`;
-  const bottomPct = `${(1 - mainSplit) * 100}%`;
-  const leftPct = vmCollapsed ? '100%' : `${topSplit * 100}%`;
-  const rightPct = vmCollapsed ? '0%' : `${(1 - topSplit) * 100}%`;
+  const topPct = `calc(${mainSplit * 100}% - 2px)`;
+  const bottomPct = `calc(${(1 - mainSplit) * 100}% - 2px)`;
+  const leftPct = vmCollapsed ? '100%' : `calc(${topSplit * 100}% - 2px)`;
+  const rightPct = vmCollapsed ? '0%' : `calc(${(1 - topSplit) * 100}% - 2px)`;
 
   return (
     <div className="h-screen w-screen flex overflow-hidden">

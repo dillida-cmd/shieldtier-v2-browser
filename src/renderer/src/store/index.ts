@@ -3,6 +3,7 @@ import type {
   AnalysisResult,
   CaptureData,
   DownloadInfo,
+  FileEntry,
   VmStatus,
   VmEvent,
   Finding,
@@ -63,6 +64,12 @@ interface ShieldTierState {
   navTitle: string;
   currentDownload: DownloadInfo | null;
 
+  screenshots: string[];
+  capturedFiles: FileEntry[];
+  vmCpuPct: number;
+  vmRamMb: number;
+  vmNetKbps: number;
+
   setPreset: (preset: LayoutPreset) => void;
   setTopSplit: (ratio: number) => void;
   setMainSplit: (ratio: number) => void;
@@ -80,6 +87,10 @@ interface ShieldTierState {
   setNavState: (state: { can_back: boolean; can_forward: boolean; loading: boolean; url: string; title: string }) => void;
   setCurrentDownload: (info: DownloadInfo | null) => void;
   setCurrentSha256: (sha256: string) => void;
+  addScreenshot: (url: string) => void;
+  addCapturedFile: (file: FileEntry) => void;
+  setCapturedFiles: (files: FileEntry[]) => void;
+  setVmStats: (cpu: number, ram: number, net: number) => void;
 }
 
 export const useStore = create<ShieldTierState>()((set) => ({
@@ -113,6 +124,12 @@ export const useStore = create<ShieldTierState>()((set) => ({
   navCurrentUrl: '',
   navTitle: '',
   currentDownload: null,
+
+  screenshots: [],
+  capturedFiles: [],
+  vmCpuPct: 0,
+  vmRamMb: 0,
+  vmNetKbps: 0,
 
   setPreset: (preset) => {
     const config = PRESET_CONFIGS[preset];
@@ -154,4 +171,8 @@ export const useStore = create<ShieldTierState>()((set) => ({
     analysisStatus: 'pending',
     analysisResult: null,
   }),
+  addScreenshot: (url) => set((s) => ({ screenshots: [...s.screenshots, url] })),
+  addCapturedFile: (file) => set((s) => ({ capturedFiles: [...s.capturedFiles, file] })),
+  setCapturedFiles: (capturedFiles) => set({ capturedFiles }),
+  setVmStats: (vmCpuPct, vmRamMb, vmNetKbps) => set({ vmCpuPct, vmRamMb, vmNetKbps }),
 }));

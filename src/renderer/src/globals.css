@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./animations.css";
 
 @font-face {
   font-family: 'JetBrains Mono';
@@ -12,22 +13,173 @@
   --st-bg-panel: #0f1117;
   --st-bg-elevated: #151921;
   --st-bg-hover: #1a1f2e;
+  --st-bg-overlay: rgba(0, 0, 0, 0.60);
+
   --st-border: #1c2030;
   --st-border-bright: #2a3045;
+  --st-border-subtle: rgba(0, 255, 65, 0.06);
+
   --st-text-primary: #00ff41;
   --st-text-secondary: #00cc33;
   --st-text-muted: #2d5a35;
   --st-text-label: #94a3b8;
-  --st-accent: #3b82f6;
-  --st-accent-dim: rgba(59, 130, 246, 0.1);
+
+  /* Threat-reactive accent (clean = Phantom Terminal green) */
+  --st-accent: #00ff41;
+  --st-accent-hover: #00cc33;
+  --st-accent-glow: rgba(0, 255, 65, 0.15);
+  --st-accent-dim: rgba(0, 255, 65, 0.10);
+  --st-threat-pulse: none;
+  --st-threat-glow-intensity: 0.15;
+
+  /* Static semantic colors */
   --st-severity-critical: #ff0040;
   --st-severity-high: #ff6600;
   --st-severity-medium: #ffcc00;
   --st-severity-low: #00ccff;
   --st-severity-clean: #00ff41;
+  --st-purple: #8b5cf6;
+  --st-purple-dim: rgba(139, 92, 246, 0.12);
+
+  /* Glass system */
+  --st-glass-bg: rgba(15, 17, 23, 0.65);
+  --st-glass-bg-heavy: rgba(10, 10, 10, 0.80);
+  --st-glass-bg-light: rgba(15, 17, 23, 0.45);
+  --st-glass-input-bg: rgba(10, 10, 10, 0.6);
+  --st-glass-border: rgba(0, 255, 65, 0.08);
+  --st-glass-border-accent: rgba(0, 255, 65, 0.25);
+  --st-glass-border-purple: rgba(139, 92, 246, 0.25);
+  --st-glass-border-red: rgba(255, 0, 64, 0.25);
+  --st-glass-blur: 16px;
+  --st-glass-blur-heavy: 24px;
+  --st-glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+
+  /* Gradients */
+  --st-gradient-brand: linear-gradient(135deg, #00ff41, #00ccff);
+
+  /* Typography scale */
+  --st-text-xs: 10px;
+  --st-text-sm: 11px;
+  --st-text-base: 12px;
+
+  /* Radius */
+  --st-radius: 4px;
+  --st-radius-sm: 2px;
+
+  /* Fonts */
   --st-font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', ui-monospace, monospace;
   --st-font-ui: 'Inter', system-ui, -apple-system, sans-serif;
 }
+
+/* Threat Level: Clean (default — Phantom Terminal green) */
+[data-threat="clean"], :root {
+  --st-accent: #00ff41;
+  --st-accent-hover: #00cc33;
+  --st-accent-glow: rgba(0, 255, 65, 0.15);
+  --st-accent-dim: rgba(0, 255, 65, 0.10);
+  --st-glass-border-accent: rgba(0, 255, 65, 0.25);
+  --st-threat-pulse: none;
+  --st-threat-glow-intensity: 0.15;
+}
+
+/* Threat Level: Suspicious (amber) */
+[data-threat="suspicious"] {
+  --st-accent: #ffcc00;
+  --st-accent-hover: #e6b800;
+  --st-accent-glow: rgba(255, 204, 0, 0.15);
+  --st-accent-dim: rgba(255, 204, 0, 0.10);
+  --st-glass-border-accent: rgba(255, 204, 0, 0.25);
+  --st-threat-pulse: threat-pulse 3s ease-in-out infinite;
+  --st-threat-glow-intensity: 0.15;
+}
+
+/* Threat Level: Malicious (pulsing red) */
+[data-threat="malicious"] {
+  --st-accent: #ff0040;
+  --st-accent-hover: #cc0033;
+  --st-accent-glow: rgba(255, 0, 64, 0.20);
+  --st-accent-dim: rgba(255, 0, 64, 0.12);
+  --st-glass-border-accent: rgba(255, 0, 64, 0.30);
+  --st-threat-pulse: threat-pulse 1.5s ease-in-out infinite;
+  --st-threat-glow-intensity: 0.20;
+}
+
+/* Smooth 1.5s transitions when threat level changes */
+:root {
+  transition:
+    --st-accent 1.5s ease,
+    --st-accent-hover 1.5s ease,
+    --st-accent-glow 1.5s ease,
+    --st-accent-dim 1.5s ease,
+    --st-glass-border-accent 1.5s ease;
+}
+
+/* Tailwind v4 Theme Extension */
+
+@theme {
+  --color-st-bg: var(--st-bg-primary);
+  --color-st-panel: var(--st-bg-panel);
+  --color-st-elevated: var(--st-bg-elevated);
+  --color-st-overlay: var(--st-bg-overlay);
+
+  --color-st-accent: var(--st-accent);
+  --color-st-accent-hover: var(--st-accent-hover);
+  --color-st-accent-glow: var(--st-accent-glow);
+  --color-st-accent-dim: var(--st-accent-dim);
+
+  --color-st-text: var(--st-text-primary);
+  --color-st-text-secondary: var(--st-text-secondary);
+  --color-st-text-muted: var(--st-text-muted);
+  --color-st-text-label: var(--st-text-label);
+
+  --color-st-border: var(--st-border);
+  --color-st-border-bright: var(--st-border-bright);
+  --color-st-border-subtle: var(--st-border-subtle);
+
+  --font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Code', 'Fira Code', monospace;
+
+  --animate-threat-pulse: threat-pulse 1.5s ease-in-out infinite;
+  --animate-shimmer: shimmer 1.5s ease-in-out infinite;
+  --animate-badge-pop: badge-pop 0.3s ease;
+  --animate-fade-in: fade-in 0.2s ease;
+  --animate-slide-up: slide-up 0.2s ease;
+  --animate-slide-down: slide-down 0.2s ease;
+}
+
+/* Keyframes */
+
+@keyframes threat-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes badge-pop {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.2); }
+  100% { transform: scale(1); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-down {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Base Styles */
 
 * {
   box-sizing: border-box;
@@ -42,11 +194,12 @@ html, body, #root {
   background: var(--st-bg-primary);
   color: var(--st-text-primary);
   font-family: var(--st-font-mono);
-  font-size: 12px;
+  font-size: var(--st-text-base);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }
 
+/* Scanline overlay */
 #root::after {
   content: '';
   position: fixed;
@@ -62,25 +215,91 @@ html, body, #root {
   );
 }
 
-.glass {
-  background: rgba(15, 17, 23, 0.85);
+/* Glass Utility Classes */
+
+@utility glass {
+  background: var(--st-glass-bg);
+  backdrop-filter: blur(var(--st-glass-blur));
+  -webkit-backdrop-filter: blur(var(--st-glass-blur));
+  border-color: var(--st-glass-border);
+  box-shadow: var(--st-glass-shadow);
+}
+
+@utility glass-heavy {
+  background: var(--st-glass-bg-heavy);
+  backdrop-filter: blur(var(--st-glass-blur-heavy));
+  -webkit-backdrop-filter: blur(var(--st-glass-blur-heavy));
+  border-color: var(--st-glass-border);
+  box-shadow: var(--st-glass-shadow);
+}
+
+@utility glass-light {
+  background: var(--st-glass-bg-light);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
+  border-color: var(--st-glass-border);
 }
 
-.glass-heavy {
-  background: rgba(10, 10, 10, 0.92);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+@utility glass-accent {
+  background: var(--st-glass-bg);
+  backdrop-filter: blur(var(--st-glass-blur));
+  -webkit-backdrop-filter: blur(var(--st-glass-blur));
+  border-color: var(--st-glass-border-accent);
+  box-shadow: var(--st-glass-shadow), 0 0 20px var(--st-accent-glow);
 }
 
-.glow {
+@utility glass-danger {
+  background: var(--st-glass-bg);
+  backdrop-filter: blur(var(--st-glass-blur));
+  -webkit-backdrop-filter: blur(var(--st-glass-blur));
+  border-color: var(--st-glass-border-red);
+  box-shadow: var(--st-glass-shadow), 0 0 20px rgba(255, 0, 64, 0.12);
+}
+
+@utility glass-terminal {
+  background: rgba(0, 10, 2, 0.90);
+  backdrop-filter: blur(var(--st-glass-blur));
+  -webkit-backdrop-filter: blur(var(--st-glass-blur));
+  border-color: rgba(0, 255, 65, 0.06);
+}
+
+/* Brand gradient text */
+@utility text-gradient-brand {
+  background: var(--st-gradient-brand);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Shimmer loading effect (green-tinted) */
+@utility shimmer {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(0, 255, 65, 0.04) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+/* Threat-reactive app shell glow */
+@utility threat-glow {
+  box-shadow: inset 0 0 60px rgba(from var(--st-accent) r g b / var(--st-threat-glow-intensity));
+  animation: var(--st-threat-pulse);
+}
+
+/* Glow text utilities */
+
+@utility glow {
   text-shadow: 0 0 6px var(--st-text-primary);
 }
 
-.glow-accent {
+@utility glow-accent {
   text-shadow: 0 0 6px var(--st-accent);
 }
+
+/* Scrollbar */
 
 ::-webkit-scrollbar {
   width: 6px;
@@ -90,14 +309,16 @@ html, body, #root {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--st-border-bright);
+  background: rgba(0, 255, 65, 0.15);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--st-text-muted);
+  background: rgba(0, 255, 65, 0.30);
 }
 
+/* Selection */
+
 ::selection {
-  background: rgba(59, 130, 246, 0.3);
+  background: rgba(0, 255, 65, 0.25);
   color: var(--st-text-primary);
 }

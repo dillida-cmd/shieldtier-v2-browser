@@ -5,7 +5,7 @@ import type { CaptureData } from '../ipc/types';
 
 export function useCapturePolling(intervalMs = 1000) {
   const { capturing, setCaptureData } = useStore();
-  const timerRef = useRef<ReturnType<typeof setInterval>>();
+  const timerRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
 
   useEffect(() => {
     if (!capturing) return;
