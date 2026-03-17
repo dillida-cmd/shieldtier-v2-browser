@@ -6,7 +6,10 @@
 #include <random>
 
 #ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
+#pragma comment(lib, "ws2_32.lib")
 #else
 #include <signal.h>
 #include <spawn.h>
@@ -274,7 +277,11 @@ int QemuLauncher::allocate_port() const {
         return dist(gen);
     }
 
+#ifdef _WIN32
+    int len = static_cast<int>(sizeof(addr));
+#else
     socklen_t len = sizeof(addr);
+#endif
     getsockname(sock, reinterpret_cast<struct sockaddr*>(&addr), &len);
     int port = ntohs(addr.sin_port);
 

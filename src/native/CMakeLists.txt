@@ -94,7 +94,7 @@ target_link_libraries(shieldtier PRIVATE
 if(OS_LINUX)
     target_link_libraries(shieldtier PRIVATE OpenSSL::Crypto)
 elseif(OS_WINDOWS)
-    target_link_libraries(shieldtier PRIVATE bcrypt)
+    target_link_libraries(shieldtier PRIVATE bcrypt ws2_32 iphlpapi)
 endif()
 
 # Ensure renderer is built before the main binary
