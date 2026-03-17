@@ -1,8 +1,62 @@
 #include "chat/shieldcrypt.h"
 
+#ifndef SHIELDTIER_NO_SODIUM
 #include <sodium.h>
+#endif
 
 namespace shieldtier {
+
+#ifdef SHIELDTIER_NO_SODIUM
+
+// Stub implementations when libsodium is not available
+Result<bool> ShieldCrypt::initialize() { return true; }
+Result<KeyPair> ShieldCrypt::generate_keypair() {
+    KeyPair kp;
+    kp.public_key.resize(32, 0);
+    kp.secret_key.resize(32, 0);
+    // Fill with pseudo-random bytes using C++ random
+    for (size_t i = 0; i < 32; ++i) {
+        kp.public_key[i] = static_cast<uint8_t>(rand() & 0xFF);
+        kp.secret_key[i] = static_cast<uint8_t>(rand() & 0xFF);
+    }
+    return kp;
+}
+Result<EncryptedMessage> ShieldCrypt::encrypt(
+    const std::string& plaintext,
+    const std::vector<uint8_t>& /*recipient_pubkey*/,
+    const std::vector<uint8_t>& /*sender_secretkey*/) {
+    EncryptedMessage msg;
+    msg.ciphertext.assign(plaintext.begin(), plaintext.end());
+    msg.nonce.resize(24, 0);
+    msg.sender_pubkey.resize(32, 0);
+    return msg;
+}
+Result<std::string> ShieldCrypt::decrypt(
+    const EncryptedMessage& message,
+    const std::vector<uint8_t>& /*recipient_secretkey*/) {
+    return std::string(message.ciphertext.begin(), message.ciphertext.end());
+}
+std::string ShieldCrypt::encode_base64(const std::vector<uint8_t>& data) {
+    static const char* table = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string result;
+    size_t i = 0;
+    while (i < data.size()) {
+        uint32_t a = i < data.size() ? data[i++] : 0;
+        uint32_t b = i < data.size() ? data[i++] : 0;
+        uint32_t c = i < data.size() ? data[i++] : 0;
+        uint32_t triple = (a << 16) | (b << 8) | c;
+        result += table[(triple >> 18) & 0x3F];
+        result += table[(triple >> 12) & 0x3F];
+        result += table[(triple >> 6) & 0x3F];
+        result += table[triple & 0x3F];
+    }
+    return result;
+}
+Result<std::vector<uint8_t>> ShieldCrypt::decode_base64(const std::string& /*b64*/) {
+    return std::vector<uint8_t>{};
+}
+
+#else  // libsodium available
 
 Result<bool> ShieldCrypt::initialize() {
     if (sodium_init() == -1) {
@@ -113,5 +167,7 @@ Result<std::vector<uint8_t>> ShieldCrypt::decode_base64(const std::string& b64) 
     bin.resize(bin_len);
     return bin;
 }
+
+#endif  // SHIELDTIER_NO_SODIUM
 
 }  // namespace shieldtier

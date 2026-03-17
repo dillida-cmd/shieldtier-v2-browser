@@ -99,7 +99,9 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
-# Autotools dependencies via ExternalProject
+# yara + libsodium — platform-specific build strategies
+# Unix: autotools via ExternalProject (./configure && make)
+# Windows: vcpkg or pre-built, with stub fallback
 # ---------------------------------------------------------------------------
 include(ExternalProject)
 include(ProcessorCount)
@@ -108,43 +110,107 @@ if(NOT NPROC OR NPROC EQUAL 0)
     set(NPROC 4)
 endif()
 
-ExternalProject_Add(yara_ext
-    SOURCE_DIR "${CMAKE_SOURCE_DIR}/third_party/yara"
-    CONFIGURE_COMMAND sh -c "cd <SOURCE_DIR> && ./bootstrap.sh && ./configure --prefix=<INSTALL_DIR> --disable-shared --enable-static --without-crypto"
-    BUILD_COMMAND make -j${NPROC}
-    INSTALL_COMMAND make install
-    BUILD_IN_SOURCE TRUE
-    BUILD_BYPRODUCTS "<INSTALL_DIR>/lib/libyara.a"
-)
+if(OS_WINDOWS)
+    # -----------------------------------------------------------------------
+    # Windows: Use vcpkg if available, otherwise build libsodium with CMake
+    # and provide a yara stub (YARA scanning disabled on Windows for now).
+    #
+    # To enable full YARA on Windows, install via vcpkg:
+    #   vcpkg install yara:x64-windows libsodium:x64-windows
+    #   cmake -DCMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake ..
+    # -----------------------------------------------------------------------
 
-ExternalProject_Get_Property(yara_ext INSTALL_DIR)
-set(YARA_INSTALL_DIR "${INSTALL_DIR}")
+    # Try finding pre-installed packages first (vcpkg, manual install, etc.)
+    find_library(YARA_LIBRARY NAMES yara yara64 libyara PATHS
+        "${CMAKE_SOURCE_DIR}/third_party/yara/windows/vs2019/x64/Release"
+        "$ENV{VCPKG_ROOT}/installed/x64-windows/lib"
+    )
+    find_path(YARA_INCLUDE_DIR NAMES yara.h PATHS
+        "${CMAKE_SOURCE_DIR}/third_party/yara/libyara/include"
+        "$ENV{VCPKG_ROOT}/installed/x64-windows/include"
+    )
 
-add_library(yara STATIC IMPORTED GLOBAL)
-set_target_properties(yara PROPERTIES
-    IMPORTED_LOCATION "${YARA_INSTALL_DIR}/lib/libyara.a"
-    INTERFACE_INCLUDE_DIRECTORIES "${YARA_INSTALL_DIR}/include"
-)
-add_dependencies(yara yara_ext)
+    if(YARA_LIBRARY AND YARA_INCLUDE_DIR)
+        message(STATUS "Found YARA: ${YARA_LIBRARY}")
+        add_library(yara STATIC IMPORTED GLOBAL)
+        set_target_properties(yara PROPERTIES
+            IMPORTED_LOCATION "${YARA_LIBRARY}"
+            INTERFACE_INCLUDE_DIRECTORIES "${YARA_INCLUDE_DIR}"
+        )
+    else()
+        message(WARNING "YARA not found on Windows — YARA scanning will be stubbed. "
+                        "Install via: vcpkg install yara:x64-windows")
+        # Create a stub target so the build doesn't fail
+        add_library(yara INTERFACE)
+        target_compile_definitions(yara INTERFACE SHIELDTIER_NO_YARA=1)
+    endif()
 
-ExternalProject_Add(libsodium_ext
-    SOURCE_DIR "${CMAKE_SOURCE_DIR}/third_party/libsodium"
-    CONFIGURE_COMMAND sh -c "cd <SOURCE_DIR> && ./autogen.sh && ./configure --prefix=<INSTALL_DIR> --disable-shared --enable-static"
-    BUILD_COMMAND make -j${NPROC}
-    INSTALL_COMMAND make install
-    BUILD_IN_SOURCE TRUE
-    BUILD_BYPRODUCTS "<INSTALL_DIR>/lib/libsodium.a"
-)
+    # libsodium — try vcpkg or pre-built
+    find_library(SODIUM_LIBRARY NAMES sodium libsodium PATHS
+        "$ENV{VCPKG_ROOT}/installed/x64-windows/lib"
+        "${CMAKE_SOURCE_DIR}/third_party/libsodium/bin/x64/Release/v143"
+    )
+    find_path(SODIUM_INCLUDE_DIR NAMES sodium.h PATHS
+        "$ENV{VCPKG_ROOT}/installed/x64-windows/include"
+        "${CMAKE_SOURCE_DIR}/third_party/libsodium/src/libsodium/include"
+    )
 
-ExternalProject_Get_Property(libsodium_ext INSTALL_DIR)
-set(SODIUM_INSTALL_DIR "${INSTALL_DIR}")
+    if(SODIUM_LIBRARY AND SODIUM_INCLUDE_DIR)
+        message(STATUS "Found libsodium: ${SODIUM_LIBRARY}")
+        add_library(sodium STATIC IMPORTED GLOBAL)
+        set_target_properties(sodium PROPERTIES
+            IMPORTED_LOCATION "${SODIUM_LIBRARY}"
+            INTERFACE_INCLUDE_DIRECTORIES "${SODIUM_INCLUDE_DIR}"
+        )
+    else()
+        message(WARNING "libsodium not found on Windows — chat encryption will be stubbed. "
+                        "Install via: vcpkg install libsodium:x64-windows")
+        add_library(sodium INTERFACE)
+        target_compile_definitions(sodium INTERFACE SHIELDTIER_NO_SODIUM=1)
+    endif()
 
-add_library(sodium STATIC IMPORTED GLOBAL)
-set_target_properties(sodium PROPERTIES
-    IMPORTED_LOCATION "${SODIUM_INSTALL_DIR}/lib/libsodium.a"
-    INTERFACE_INCLUDE_DIRECTORIES "${SODIUM_INSTALL_DIR}/include"
-)
-add_dependencies(sodium libsodium_ext)
+else()
+    # -----------------------------------------------------------------------
+    # Unix (macOS, Linux): Build via autotools
+    # -----------------------------------------------------------------------
+    ExternalProject_Add(yara_ext
+        SOURCE_DIR "${CMAKE_SOURCE_DIR}/third_party/yara"
+        CONFIGURE_COMMAND sh -c "cd <SOURCE_DIR> && ./bootstrap.sh && ./configure --prefix=<INSTALL_DIR> --disable-shared --enable-static --without-crypto"
+        BUILD_COMMAND make -j${NPROC}
+        INSTALL_COMMAND make install
+        BUILD_IN_SOURCE TRUE
+        BUILD_BYPRODUCTS "<INSTALL_DIR>/lib/libyara.a"
+    )
+
+    ExternalProject_Get_Property(yara_ext INSTALL_DIR)
+    set(YARA_INSTALL_DIR "${INSTALL_DIR}")
+
+    add_library(yara STATIC IMPORTED GLOBAL)
+    set_target_properties(yara PROPERTIES
+        IMPORTED_LOCATION "${YARA_INSTALL_DIR}/lib/libyara.a"
+        INTERFACE_INCLUDE_DIRECTORIES "${YARA_INSTALL_DIR}/include"
+    )
+    add_dependencies(yara yara_ext)
+
+    ExternalProject_Add(libsodium_ext
+        SOURCE_DIR "${CMAKE_SOURCE_DIR}/third_party/libsodium"
+        CONFIGURE_COMMAND sh -c "cd <SOURCE_DIR> && ./autogen.sh && ./configure --prefix=<INSTALL_DIR> --disable-shared --enable-static"
+        BUILD_COMMAND make -j${NPROC}
+        INSTALL_COMMAND make install
+        BUILD_IN_SOURCE TRUE
+        BUILD_BYPRODUCTS "<INSTALL_DIR>/lib/libsodium.a"
+    )
+
+    ExternalProject_Get_Property(libsodium_ext INSTALL_DIR)
+    set(SODIUM_INSTALL_DIR "${INSTALL_DIR}")
+
+    add_library(sodium STATIC IMPORTED GLOBAL)
+    set_target_properties(sodium PROPERTIES
+        IMPORTED_LOCATION "${SODIUM_INSTALL_DIR}/lib/libsodium.a"
+        INTERFACE_INCLUDE_DIRECTORIES "${SODIUM_INSTALL_DIR}/include"
+    )
+    add_dependencies(sodium libsodium_ext)
+endif()
 
 # ---------------------------------------------------------------------------
 # Optional protection passes (stubs until phases C/D)

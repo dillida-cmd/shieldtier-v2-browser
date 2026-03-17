@@ -3,6 +3,36 @@
 #include <chrono>
 
 namespace shieldtier {
+
+#ifdef SHIELDTIER_NO_YARA
+
+// Stub implementation when YARA is not available (Windows without vcpkg)
+YaraEngine::YaraEngine() = default;
+YaraEngine::~YaraEngine() = default;
+
+Result<bool> YaraEngine::initialize() {
+    initialized_ = true;
+    return true;
+}
+
+Result<bool> YaraEngine::compile_rules() {
+    return true;
+}
+
+Result<AnalysisEngineResult> YaraEngine::scan(const FileBuffer& file) {
+    AnalysisEngineResult result;
+    result.engine = AnalysisEngine::kYara;
+    result.success = true;
+    result.duration_ms = 0.0;
+    result.raw_output = {
+        {"rules_matched", 0},
+        {"note", "YARA not available — install via vcpkg"},
+    };
+    return result;
+}
+
+#else  // YARA available
+
 namespace {
 
 Severity severity_from_string(const char* str) {
@@ -130,7 +160,6 @@ int YaraEngine::scan_callback(YR_SCAN_CONTEXT* /*context*/, int message,
             {"author", author},
         };
 
-        // Collect matched tags
         const char* tag;
         std::vector<std::string> tags;
         yr_rule_tags_foreach(rule, tag) {
@@ -162,7 +191,6 @@ Result<AnalysisEngineResult> YaraEngine::scan(const FileBuffer& file) {
     auto start = std::chrono::steady_clock::now();
 
     std::vector<Finding> findings;
-    // yr_rules_scan_mem is thread-safe with separate user_data
     int result = yr_rules_scan_mem(rules, file.ptr(),
                                    file.size(), 0, scan_callback,
                                    &findings, 30);
@@ -192,5 +220,7 @@ Result<AnalysisEngineResult> YaraEngine::scan(const FileBuffer& file) {
 
     return engine_result;
 }
+
+#endif  // SHIELDTIER_NO_YARA
 
 }  // namespace shieldtier

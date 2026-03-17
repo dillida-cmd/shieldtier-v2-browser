@@ -5,7 +5,9 @@
 #include <set>
 #include <unordered_map>
 
+#ifndef SHIELDTIER_NO_SODIUM
 #include <sodium.h>
+#endif
 
 namespace shieldtier {
 
@@ -20,6 +22,7 @@ static const std::unordered_map<std::string, std::set<std::string>> kTierFeature
 };
 
 static std::string base64url_decode(const std::string& input) {
+#ifndef SHIELDTIER_NO_SODIUM
     std::vector<uint8_t> buf(input.size());
     size_t decoded_len = 0;
     int rc = sodium_base642bin(
@@ -29,6 +32,31 @@ static std::string base64url_decode(const std::string& input) {
         sodium_base64_VARIANT_URLSAFE_NO_PADDING);
     if (rc != 0) return {};
     return std::string(reinterpret_cast<const char*>(buf.data()), decoded_len);
+#else
+    // Simple base64url decode without libsodium
+    static const int T[256] = {
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,62,-1,-1,-1,63,52,53,54,55,56,57,58,59,60,61,-1,-1,-1,-1,-1,-1,
+        -1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,-1,-1,-1,-1,63,
+        -1,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,-1,-1,-1,-1,-1
+    };
+    // Convert URL-safe to standard base64
+    std::string b64 = input;
+    for (auto& c : b64) { if (c == '-') c = '+'; else if (c == '_') c = '/'; }
+    while (b64.size() % 4) b64 += '=';
+
+    std::string out;
+    out.reserve(b64.size() * 3 / 4);
+    for (size_t i = 0; i + 3 < b64.size(); i += 4) {
+        int a = T[(unsigned char)b64[i]], b2 = T[(unsigned char)b64[i+1]];
+        int c = T[(unsigned char)b64[i+2]], d = T[(unsigned char)b64[i+3]];
+        if (a < 0 || b2 < 0) break;
+        out += static_cast<char>((a << 2) | (b2 >> 4));
+        if (c >= 0) out += static_cast<char>(((b2 & 0xF) << 4) | (c >> 2));
+        if (d >= 0) out += static_cast<char>(((c & 0x3) << 6) | d);
+    }
+    return out;
+#endif
 }
 
 bool AuthToken::is_expired() const {
