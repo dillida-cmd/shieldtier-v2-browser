@@ -72,6 +72,10 @@ set(ENABLE_TAR OFF CACHE INTERNAL "")
 set(ENABLE_CPIO OFF CACHE INTERNAL "")
 set(ENABLE_CAT OFF CACHE INTERNAL "")
 add_subdirectory(third_party/libarchive)
+# MSVC treats wcscpy/wcslen as intrinsics — disable for libarchive
+if(TARGET archive_static AND MSVC)
+    target_compile_options(archive_static PRIVATE /Oi-)
+endif()
 
 # ---------------------------------------------------------------------------
 # OpenSSL — required on Linux for SHA-256 in hardware_fingerprint,
