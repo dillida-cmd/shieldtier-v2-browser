@@ -113,7 +113,11 @@ void ChatManager::clear_history() {
 
 std::string ChatManager::generate_message_id() {
     uint8_t buf[16];
+#ifndef SHIELDTIER_NO_SODIUM
     randombytes_buf(buf, sizeof(buf));
+#else
+    for (auto& b : buf) b = static_cast<uint8_t>(rand() & 0xFF);
+#endif
 
     static constexpr char hex_chars[] = "0123456789abcdef";
     std::string id;

@@ -13,6 +13,9 @@
 
 #if defined(__APPLE__)
 #include <CommonCrypto/CommonDigest.h>
+#elif defined(_WIN32)
+#include <windows.h>
+#include <bcrypt.h>
 #else
 #include <openssl/evp.h>
 #endif
@@ -157,10 +160,23 @@ std::vector<std::string> FileAnalyzer::extract_strings(const uint8_t* data,
 }
 
 std::string FileAnalyzer::compute_md5(const uint8_t* data, size_t size) {
-    unsigned char digest[16];
+    unsigned char digest[16]{};
 
 #if defined(__APPLE__)
     CC_MD5(data, static_cast<CC_LONG>(size), digest);
+#elif defined(_WIN32)
+    BCRYPT_ALG_HANDLE hAlg = nullptr;
+    BCRYPT_HASH_HANDLE hHash = nullptr;
+    BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_MD5_ALGORITHM, nullptr, 0);
+    if (hAlg) {
+        BCryptCreateHash(hAlg, &hHash, nullptr, 0, nullptr, 0, 0);
+        if (hHash) {
+            BCryptHashData(hHash, const_cast<PUCHAR>(data), static_cast<ULONG>(size), 0);
+            BCryptFinishHash(hHash, digest, 16, 0);
+            BCryptDestroyHash(hHash);
+        }
+        BCryptCloseAlgorithmProvider(hAlg, 0);
+    }
 #else
     EVP_MD_CTX* ctx = EVP_MD_CTX_new();
     if (!ctx) return std::string(32, '0');
