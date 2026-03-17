@@ -7,6 +7,11 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# MSVC-specific flags
+if(MSVC)
+    add_compile_options(/EHsc)  # C++ exception handling
+endif()
+
 # ---------------------------------------------------------------------------
 # Platform detection
 # ---------------------------------------------------------------------------
@@ -19,7 +24,7 @@ if(APPLE)
 elseif(WIN32)
     set(OS_WINDOWS TRUE)
     set(SHIELDTIER_PLATFORM "windows")
-    add_compile_definitions(OS_WIN=1 OS_WINDOWS=1)
+    add_compile_definitions(OS_WIN=1 OS_WINDOWS=1 NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE)
 elseif(UNIX AND NOT APPLE)
     set(OS_LINUX TRUE)
     set(SHIELDTIER_PLATFORM "linux")
