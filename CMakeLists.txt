@@ -49,8 +49,10 @@ set(BUILD_TESTS OFF CACHE INTERNAL "")
 set(BUILD_COMMAND_LINE_TOOLS OFF CACHE INTERNAL "")
 add_subdirectory(third_party/pe-parse EXCLUDE_FROM_ALL)
 # pe-parse uses -Werror but has deprecated C++ codecvt usage
-if(TARGET pe-parse)
+if(TARGET pe-parse AND NOT MSVC)
     target_compile_options(pe-parse PRIVATE -Wno-deprecated-declarations -Wno-error)
+elseif(TARGET pe-parse AND MSVC)
+    target_compile_options(pe-parse PRIVATE /w)
 endif()
 
 set(BUILD_SHARED_LIBS OFF CACHE INTERNAL "")
