@@ -2348,7 +2348,11 @@ json MessageHandler::handle_vm_get_status(const json& /*payload*/) {
 #ifdef _WIN32
         cmd = "\"" + qemu_path + "\" --version 2>nul";
 #endif
+#ifdef _WIN32
+        FILE* pipe = _popen(cmd.c_str(), "r");
+#else
         FILE* pipe = popen(cmd.c_str(), "r");
+#endif
         if (pipe) {
             char buf[256];
             if (fgets(buf, sizeof(buf), pipe)) {
@@ -2360,7 +2364,11 @@ json MessageHandler::handle_vm_get_status(const json& /*payload*/) {
                     if (end != std::string::npos) version = version.substr(0, end);
                 }
             }
+#ifdef _WIN32
+            _pclose(pipe);
+#else
             pclose(pipe);
+#endif
         }
     }
 

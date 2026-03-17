@@ -6,7 +6,9 @@
 #include <fstream>
 #include <unordered_set>
 
+#ifndef SHIELDTIER_NO_SODIUM
 #include <sodium.h>
+#endif
 
 #include "analysis/enrichment/http_client.h"
 

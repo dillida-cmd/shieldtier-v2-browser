@@ -3,7 +3,9 @@
 #include <chrono>
 #include <cstring>
 
+#ifndef SHIELDTIER_NO_SODIUM
 #include <sodium.h>
+#endif
 
 namespace shieldtier {
 
