@@ -15,19 +15,19 @@
 #include <net/if_dl.h>
 #include <sys/sysctl.h>
 #include <sys/types.h>
-#else
+#elif defined(_WIN32)
+#include <windows.h>
+#include <bcrypt.h>
+#include <intrin.h>
+#include <iphlpapi.h>
+#pragma comment(lib, "bcrypt.lib")
+#pragma comment(lib, "iphlpapi.lib")
+#elif defined(__linux__)
 #include <openssl/evp.h>
-#endif
-
-#if defined(__linux__)
 #include <fstream>
 #include <ifaddrs.h>
 #include <net/if.h>
 #include <netpacket/packet.h>
-#elif defined(_WIN32)
-#include <windows.h>
-#include <intrin.h>
-#include <iphlpapi.h>
 #endif
 
 namespace shieldtier {
@@ -45,7 +45,33 @@ std::string sha256_hex(const std::string& input) {
         ss << std::setw(2) << static_cast<unsigned>(digest[i]);
     }
     return ss.str();
+#elif defined(_WIN32)
+    // Windows BCrypt SHA-256
+    BCRYPT_ALG_HANDLE hAlg = nullptr;
+    BCRYPT_HASH_HANDLE hHash = nullptr;
+    unsigned char digest[32]{};
+
+    BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_SHA256_ALGORITHM, nullptr, 0);
+    if (hAlg) {
+        BCryptCreateHash(hAlg, &hHash, nullptr, 0, nullptr, 0, 0);
+        if (hHash) {
+            BCryptHashData(hHash,
+                reinterpret_cast<PUCHAR>(const_cast<char*>(input.data())),
+                static_cast<ULONG>(input.size()), 0);
+            BCryptFinishHash(hHash, digest, 32, 0);
+            BCryptDestroyHash(hHash);
+        }
+        BCryptCloseAlgorithmProvider(hAlg, 0);
+    }
+
+    std::ostringstream ss;
+    ss << std::hex << std::setfill('0');
+    for (int i = 0; i < 32; ++i) {
+        ss << std::setw(2) << static_cast<unsigned>(digest[i]);
+    }
+    return ss.str();
 #else
+    // Linux — OpenSSL EVP
     unsigned char digest[EVP_MAX_MD_SIZE];
     unsigned int digest_len = 0;
     EVP_MD_CTX* ctx = EVP_MD_CTX_new();

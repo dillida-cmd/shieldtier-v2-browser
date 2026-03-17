@@ -89,9 +89,12 @@ target_link_libraries(shieldtier PRIVATE
     sodium
 )
 
-# OpenSSL for SHA-256 on non-macOS (hardware_fingerprint, response_filter)
-if(NOT APPLE)
+# Platform crypto for SHA-256 (hardware_fingerprint, response_filter)
+# macOS: CommonCrypto (system), Linux: OpenSSL, Windows: BCrypt
+if(OS_LINUX)
     target_link_libraries(shieldtier PRIVATE OpenSSL::Crypto)
+elseif(OS_WINDOWS)
+    target_link_libraries(shieldtier PRIVATE bcrypt)
 endif()
 
 # Ensure renderer is built before the main binary

@@ -8,6 +8,10 @@
 
 #if defined(OS_MAC)
 #include <CommonCrypto/CommonDigest.h>
+#elif defined(OS_WIN) || defined(OS_WINDOWS)
+#include <windows.h>
+#include <bcrypt.h>
+#pragma comment(lib, "bcrypt.lib")
 #else
 #include <openssl/evp.h>
 #endif
@@ -23,6 +27,11 @@ public:
     Sha256Hasher() {
 #if defined(OS_MAC)
         CC_SHA256_Init(&ctx_);
+#elif defined(OS_WIN) || defined(OS_WINDOWS)
+        BCryptOpenAlgorithmProvider(&hAlg_, BCRYPT_SHA256_ALGORITHM, nullptr, 0);
+        if (hAlg_) {
+            BCryptCreateHash(hAlg_, &hHash_, nullptr, 0, nullptr, 0, 0);
+        }
 #else
         ctx_ = EVP_MD_CTX_new();
         if (ctx_) {
@@ -32,7 +41,12 @@ public:
     }
 
     ~Sha256Hasher() {
-#if !defined(OS_MAC)
+#if defined(OS_MAC)
+        // CC_SHA256_CTX is a value type, no cleanup needed
+#elif defined(OS_WIN) || defined(OS_WINDOWS)
+        if (hHash_) BCryptDestroyHash(hHash_);
+        if (hAlg_) BCryptCloseAlgorithmProvider(hAlg_, 0);
+#else
         if (ctx_) {
             EVP_MD_CTX_free(ctx_);
         }
@@ -52,6 +66,11 @@ public:
             p += chunk;
             len -= chunk;
         }
+#elif defined(OS_WIN) || defined(OS_WINDOWS)
+        if (hHash_) {
+            BCryptHashData(hHash_, static_cast<PUCHAR>(const_cast<void*>(data)),
+                           static_cast<ULONG>(len), 0);
+        }
 #else
         if (ctx_) {
             EVP_DigestUpdate(ctx_, data, len);
@@ -63,6 +82,10 @@ public:
         std::array<unsigned char, 32> digest{};
 #if defined(OS_MAC)
         CC_SHA256_Final(digest.data(), &ctx_);
+#elif defined(OS_WIN) || defined(OS_WINDOWS)
+        if (hHash_) {
+            BCryptFinishHash(hHash_, digest.data(), 32, 0);
+        }
 #else
         if (ctx_) {
             unsigned int digest_len = 0;
@@ -80,6 +103,9 @@ public:
 private:
 #if defined(OS_MAC)
     CC_SHA256_CTX ctx_;
+#elif defined(OS_WIN) || defined(OS_WINDOWS)
+    BCRYPT_ALG_HANDLE hAlg_ = nullptr;
+    BCRYPT_HASH_HANDLE hHash_ = nullptr;
 #else
     EVP_MD_CTX* ctx_ = nullptr;
 #endif

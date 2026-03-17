@@ -72,10 +72,10 @@ set(ENABLE_CAT OFF CACHE INTERNAL "")
 add_subdirectory(third_party/libarchive)
 
 # ---------------------------------------------------------------------------
-# OpenSSL — required on Linux/Windows for SHA-256 in hardware_fingerprint,
-#            response_filter, etc. macOS uses CommonCrypto instead.
+# OpenSSL — required on Linux for SHA-256 in hardware_fingerprint,
+#            response_filter, etc. macOS uses CommonCrypto. Windows uses BCrypt.
 # ---------------------------------------------------------------------------
-if(NOT APPLE)
+if(OS_LINUX)
     find_package(OpenSSL REQUIRED)
 endif()
 
