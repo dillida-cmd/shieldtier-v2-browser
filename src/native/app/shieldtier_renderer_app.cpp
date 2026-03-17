@@ -1,5 +1,15 @@
 #include "app/shieldtier_renderer_app.h"
 
+#include "include/cef_scheme.h"
+
+void ShieldTierRendererApp::OnRegisterCustomSchemes(
+        CefRawPtr<CefSchemeRegistrar> registrar) {
+    registrar->AddCustomScheme(
+        "shieldtier",
+        CEF_SCHEME_OPTION_STANDARD | CEF_SCHEME_OPTION_SECURE |
+        CEF_SCHEME_OPTION_CORS_ENABLED | CEF_SCHEME_OPTION_FETCH_ENABLED);
+}
+
 void ShieldTierRendererApp::OnWebKitInitialized() {
     CefMessageRouterConfig config;
     message_router_ = CefMessageRouterRendererSide::Create(config);

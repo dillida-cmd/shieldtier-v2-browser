@@ -4,35 +4,42 @@ import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '../../lib/utils';
 
 const buttonVariants = cva(
-  'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded font-mono font-bold uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--st-accent)] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer border-none',
+  'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[color:var(--st-accent)] disabled:pointer-events-none disabled:opacity-40 [&_svg]:pointer-events-none [&_svg]:shrink-0 cursor-pointer',
   {
     variants: {
       variant: {
-        ghost: 'bg-transparent text-[var(--st-text-muted)] hover:text-[var(--st-text-secondary)] hover:bg-[var(--st-bg-hover)]',
-        primary: 'bg-[var(--st-accent-dim)] text-[var(--st-accent)] hover:bg-[var(--st-accent)]/20',
-        danger: 'bg-[var(--st-severity-critical)]/15 text-[var(--st-severity-critical)] hover:bg-[var(--st-severity-critical)]/25',
-        terminal: 'bg-transparent text-[var(--st-text-primary)] hover:bg-[var(--st-accent-dim)] glow',
+        default:
+          'bg-[color:var(--st-accent)] text-white hover:brightness-110',
+        destructive:
+          'bg-[color:var(--st-danger)] text-white hover:brightness-110',
+        ghost:
+          'bg-transparent hover:bg-[color:var(--st-border-subtle)] text-[color:var(--st-text-secondary)]',
+        outline:
+          'border border-[color:var(--st-border)] bg-transparent text-[color:var(--st-text-secondary)] hover:bg-[color:var(--st-border-subtle)]',
+        link:
+          'text-[color:var(--st-accent)] underline-offset-4 hover:underline',
       },
       size: {
-        xs: 'h-5 px-1.5 text-[10px]',
-        sm: 'h-6 px-2 text-[10px]',
-        default: 'h-7 px-3 text-[11px]',
+        sm: 'h-7 px-2.5 text-[11px]',
+        default: 'h-8 px-3 text-[12px]',
+        lg: 'h-9 px-4 text-[13px]',
+        icon: 'h-7 w-7',
       },
     },
     defaultVariants: {
-      variant: 'ghost',
+      variant: 'default',
       size: 'default',
     },
   },
 );
 
-export interface ButtonProps
+interface ButtonProps
   extends React.ButtonHTMLAttributes<HTMLButtonElement>,
     VariantProps<typeof buttonVariants> {
   asChild?: boolean;
 }
 
-export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
+const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant, size, asChild = false, ...props }, ref) => {
     const Comp = asChild ? Slot : 'button';
     return (
@@ -45,3 +52,6 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   },
 );
 Button.displayName = 'Button';
+
+export { Button, buttonVariants };
+export type { ButtonProps };

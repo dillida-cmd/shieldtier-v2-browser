@@ -30,12 +30,15 @@ bool DownloadHandler::OnBeforeDownload(
 void DownloadHandler::OnDownloadUpdated(
     CefRefPtr<CefBrowser> /*browser*/,
     CefRefPtr<CefDownloadItem> download_item,
-    CefRefPtr<CefDownloadItemCallback> callback) {
-    // Safety net: cancel any download that somehow started writing to disk.
-    if (download_item->IsInProgress()) {
-        std::cerr << "[download] cancelling unexpected in-progress download: "
-                  << download_item->GetURL().ToString() << "\n";
-        callback->Cancel();
+    CefRefPtr<CefDownloadItemCallback> /*callback*/) {
+    // Don't cancel — response filter captures bytes in parallel.
+    // Without calling callback->Continue() in OnBeforeDownload, no disk
+    // write happens. The download may appear in CEF's internal state but
+    // no file is created.
+    if (download_item->IsComplete()) {
+        std::cerr << "[download] completed (in-memory): "
+                  << download_item->GetURL().ToString()
+                  << " size=" << download_item->GetReceivedBytes() << "\n";
     }
 }
 

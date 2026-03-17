@@ -11,6 +11,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Platform detection
 # ---------------------------------------------------------------------------
 if(APPLE)
+    enable_language(OBJCXX)
     set(OS_MACOS TRUE)
     set(OS_MAC TRUE)
     set(SHIELDTIER_PLATFORM "macos")
@@ -70,10 +71,32 @@ set(ENABLE_CPIO OFF CACHE INTERNAL "")
 set(ENABLE_CAT OFF CACHE INTERNAL "")
 add_subdirectory(third_party/libarchive)
 
-set(BUILD_TESTS OFF CACHE INTERNAL "")
-set(BUILD_TOOLS OFF CACHE INTERNAL "")
-set(BUILD_LIBWASM OFF CACHE INTERNAL "")
-add_subdirectory(third_party/wabt)
+# ---------------------------------------------------------------------------
+# OpenSSL — required on Linux/Windows for SHA-256 in hardware_fingerprint,
+#            response_filter, etc. macOS uses CommonCrypto instead.
+# ---------------------------------------------------------------------------
+if(NOT APPLE)
+    find_package(OpenSSL REQUIRED)
+endif()
+
+# ---------------------------------------------------------------------------
+# Renderer build (Vite) — runs npm build to produce dist/ before linking
+# ---------------------------------------------------------------------------
+set(RENDERER_DIR "${CMAKE_SOURCE_DIR}/src/renderer")
+set(RENDERER_DIST "${RENDERER_DIR}/dist")
+
+find_program(NPM_EXECUTABLE npm)
+if(NPM_EXECUTABLE)
+    add_custom_target(renderer_build
+        COMMAND ${NPM_EXECUTABLE} run build
+        WORKING_DIRECTORY "${RENDERER_DIR}"
+        COMMENT "Building React renderer (Vite)"
+        BYPRODUCTS "${RENDERER_DIST}/index.html"
+    )
+else()
+    message(WARNING "npm not found — renderer will not be auto-built. Pre-build with: cd src/renderer && npm run build")
+    add_custom_target(renderer_build)
+endif()
 
 # ---------------------------------------------------------------------------
 # Autotools dependencies via ExternalProject
@@ -133,3 +156,11 @@ include(VMProtect OPTIONAL)
 # Native source tree
 # ---------------------------------------------------------------------------
 add_subdirectory(src/native)
+
+# ---------------------------------------------------------------------------
+# Tests (opt-in via -DSHIELDTIER_BUILD_TESTS=ON)
+# ---------------------------------------------------------------------------
+option(SHIELDTIER_BUILD_TESTS "Build unit tests" OFF)
+if(SHIELDTIER_BUILD_TESTS)
+    add_subdirectory(tests)
+endif()

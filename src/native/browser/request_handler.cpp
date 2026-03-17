@@ -1,5 +1,6 @@
 #include "browser/request_handler.h"
 
+#include <chrono>
 #include <cstring>
 #include <string>
 
@@ -150,19 +151,20 @@ bool RequestHandler::OnBeforeBrowse(CefRefPtr<CefBrowser> browser,
                                     bool /*user_gesture*/,
                                     bool /*is_redirect*/) {
     std::string url = request->GetURL().ToString();
+    fprintf(stderr, "[ShieldTier] OnBeforeBrowse: %s\n", url.c_str());
 
     if (is_unsafe_scheme(url)) {
-        LOG(WARNING) << "[ShieldTier] Blocked unsafe scheme: " << url;
+        fprintf(stderr, "[ShieldTier] BLOCKED unsafe scheme: %s\n", url.c_str());
         return true;
     }
 
     std::string host = extract_host(url);
     if (!host.empty() && is_private_ip(host)) {
-        LOG(WARNING) << "[ShieldTier] Blocked navigation to private IP: " << host;
+        fprintf(stderr, "[ShieldTier] BLOCKED private IP: %s\n", host.c_str());
         return true;
     }
 
-    if (message_router_) {
+    if (message_router_ && browser->GetIdentifier() == ui_browser_id_) {
         message_router_->OnBeforeBrowse(browser, frame);
     }
     return false;
@@ -181,30 +183,43 @@ bool RequestHandler::OnCertificateError(CefRefPtr<CefBrowser> /*browser*/,
 
 void RequestHandler::OnRenderProcessTerminated(
         CefRefPtr<CefBrowser> browser,
-        TerminationStatus /*status*/,
-        int /*error_code*/,
-        const CefString& /*error_string*/) {
-    if (message_router_) {
+        TerminationStatus status,
+        int error_code,
+        const CefString& error_string) {
+    fprintf(stderr, "[ShieldTier] RENDERER TERMINATED: status=%d code=%d msg=%s\n",
+            status, error_code, error_string.ToString().c_str());
+    if (message_router_ && browser->GetIdentifier() == ui_browser_id_) {
         message_router_->OnRenderProcessTerminated(browser);
     }
 }
 
 CefRefPtr<CefResourceRequestHandler> RequestHandler::GetResourceRequestHandler(
-    CefRefPtr<CefBrowser> /*browser*/,
+    CefRefPtr<CefBrowser> browser,
     CefRefPtr<CefFrame> /*frame*/,
-    CefRefPtr<CefRequest> /*request*/,
+    CefRefPtr<CefRequest> request,
     bool /*is_navigation*/,
     bool /*is_download*/,
     const CefString& /*request_initiator*/,
     bool& /*disable_default_handling*/) {
+    // Track request start time for content browser requests
+    if (browser->GetIdentifier() != ui_browser_id_) {
+        std::string url = request->GetURL().ToString();
+        auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+        std::lock_guard<std::mutex> lock(timing_mutex_);
+        request_start_times_[url] = now_ms;
+    }
     return this;
 }
 
 CefRefPtr<CefResponseFilter> RequestHandler::GetResourceResponseFilter(
-    CefRefPtr<CefBrowser> /*browser*/,
+    CefRefPtr<CefBrowser> browser,
     CefRefPtr<CefFrame> /*frame*/,
     CefRefPtr<CefRequest> request,
     CefRefPtr<CefResponse> response) {
+
+    // Skip UI browser — only capture from content browser
+    if (browser->GetIdentifier() == ui_browser_id_) return nullptr;
 
     if (!is_download_response(request, response)) {
         return nullptr;
@@ -212,6 +227,8 @@ CefRefPtr<CefResponseFilter> RequestHandler::GetResourceResponseFilter(
 
     std::string url = request->GetURL().ToString();
     std::string mime = response->GetMimeType().ToString();
+    fprintf(stderr, "[filter] Attaching download capture: %s (mime=%s)\n",
+            url.c_str(), mime.c_str());
 
     if (!should_accumulate(response)) {
         return new StreamingHashFilter(url, mime);
@@ -231,6 +248,8 @@ CefRefPtr<CefResponseFilter> RequestHandler::GetResourceResponseFilter(
         if (qpos != std::string::npos) filename = filename.substr(0, qpos);
 
         size_t file_size = data.size();
+        fprintf(stderr, "[filter] Download captured: sha256=%s file=%s size=%zu\n",
+                sha256.c_str(), filename.c_str(), file_size);
 
         if (sm) {
             sm->store_captured_file(sha256, std::move(data), filename, mime_type);
@@ -246,6 +265,250 @@ CefRefPtr<CefResponseFilter> RequestHandler::GetResourceResponseFilter(
     };
 
     return new DownloadCaptureFilter(url, mime, std::move(on_complete));
+}
+
+void RequestHandler::OnResourceLoadComplete(
+        CefRefPtr<CefBrowser> browser,
+        CefRefPtr<CefFrame> /*frame*/,
+        CefRefPtr<CefRequest> request,
+        CefRefPtr<CefResponse> response,
+        URLRequestStatus /*status*/,
+        int64_t received_content_length) {
+    // Skip UI browser resources (shieldtier://app/ assets)
+    if (browser->GetIdentifier() == ui_browser_id_) return;
+
+    std::string url = request->GetURL().ToString();
+    // Skip internal schemes
+    if (url.compare(0, 13, "shieldtier://") == 0 ||
+        url.compare(0, 9, "devtools:") == 0 ||
+        url.compare(0, 6, "about:") == 0) return;
+
+    std::string method = request->GetMethod().ToString();
+    int status_code = response ? response->GetStatus() : 0;
+    std::string status_text = response ? response->GetStatusText().ToString() : "";
+    std::string mime = response ? response->GetMimeType().ToString() : "";
+
+    // Map CEF resource type enum to Chrome DevTools-style string
+    std::string resource_type;
+    switch (request->GetResourceType()) {
+        case RT_MAIN_FRAME:
+        case RT_SUB_FRAME:
+            resource_type = "Document"; break;
+        case RT_STYLESHEET:
+            resource_type = "Stylesheet"; break;
+        case RT_SCRIPT:
+            resource_type = "Script"; break;
+        case RT_IMAGE:
+        case RT_FAVICON:
+            resource_type = "Image"; break;
+        case RT_FONT_RESOURCE:
+            resource_type = "Font"; break;
+        case RT_MEDIA:
+            resource_type = "Media"; break;
+        case RT_XHR:
+            resource_type = "XHR"; break;
+        default:
+            resource_type = "Other"; break;
+    }
+
+    // Collect response headers as HAR-format array
+    json resp_header_arr = json::array();
+    if (response) {
+        CefResponse::HeaderMap hm;
+        response->GetHeaderMap(hm);
+        for (auto& [k, v] : hm) {
+            resp_header_arr.push_back({{"name", k.ToString()}, {"value", v.ToString()}});
+        }
+    }
+
+    // Collect request headers
+    json req_header_arr = json::array();
+    {
+        CefRequest::HeaderMap hm;
+        request->GetHeaderMap(hm);
+        for (auto& [k, v] : hm) {
+            req_header_arr.push_back({{"name", k.ToString()}, {"value", v.ToString()}});
+        }
+    }
+
+    auto now = std::chrono::system_clock::now();
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        now.time_since_epoch()).count();
+
+    int browser_id = browser->GetIdentifier();
+
+    // Record into CaptureManager (if capturing)
+    if (capture_manager_) {
+        CapturedRequest cap;
+        cap.method = method;
+        cap.url = url;
+        cap.status_code = status_code;
+        cap.response_size = received_content_length;
+        cap.mime_type = mime;
+        cap.timestamp = ms;
+        capture_manager_->record_request(browser_id, cap);
+    }
+
+    // Always push to event bridge for live network panel (HAR entry format)
+    if (event_bridge_) {
+        // Generate ISO 8601 timestamp
+        std::time_t t = std::chrono::system_clock::to_time_t(now);
+        char iso_buf[64];
+        std::strftime(iso_buf, sizeof(iso_buf), "%Y-%m-%dT%H:%M:%S", std::gmtime(&t));
+        std::string iso_time = std::string(iso_buf) + "." +
+            std::to_string(ms % 1000) + "Z";
+
+        // Build a requestId from timestamp + url hash
+        std::string request_id = std::to_string(ms) + "-" +
+            std::to_string(std::hash<std::string>{}(url) & 0xFFFFFF);
+
+        // Calculate total time from tracked start time
+        double total_time = 0;
+        {
+            std::lock_guard<std::mutex> lock(timing_mutex_);
+            auto it = request_start_times_.find(url);
+            if (it != request_start_times_.end()) {
+                auto now_ms_steady = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now().time_since_epoch()).count();
+                total_time = static_cast<double>(now_ms_steady - it->second);
+                request_start_times_.erase(it);
+            }
+        }
+
+        // Parse query string from URL
+        json query_arr = json::array();
+        auto qpos = url.find('?');
+        if (qpos != std::string::npos) {
+            std::string qs = url.substr(qpos + 1);
+            // Remove fragment
+            auto fpos = qs.find('#');
+            if (fpos != std::string::npos) qs = qs.substr(0, fpos);
+            // Split by &
+            size_t start = 0;
+            while (start < qs.size()) {
+                auto amp = qs.find('&', start);
+                std::string pair = (amp == std::string::npos)
+                    ? qs.substr(start) : qs.substr(start, amp - start);
+                if (!pair.empty()) {
+                    auto eq = pair.find('=');
+                    if (eq != std::string::npos) {
+                        query_arr.push_back({
+                            {"name", pair.substr(0, eq)},
+                            {"value", pair.substr(eq + 1)}
+                        });
+                    } else {
+                        query_arr.push_back({{"name", pair}, {"value", ""}});
+                    }
+                }
+                start = (amp == std::string::npos) ? qs.size() : amp + 1;
+            }
+        }
+
+        // Capture POST data from request (text-safe content only)
+        json post_data = nullptr;
+        CefRefPtr<CefPostData> pd = request->GetPostData();
+        if (pd.get() && pd->GetElementCount() > 0) {
+            // Determine MIME from Content-Type header first
+            std::string post_mime;
+            {
+                CefRequest::HeaderMap hm2;
+                request->GetHeaderMap(hm2);
+                for (auto& [k2, v2] : hm2) {
+                    std::string key_lower = k2.ToString();
+                    for (auto& ch : key_lower) ch = static_cast<char>(tolower(ch));
+                    if (key_lower == "content-type") {
+                        post_mime = v2.ToString();
+                        break;
+                    }
+                }
+            }
+
+            // Only capture text-based POST bodies (not binary uploads)
+            bool is_text = post_mime.empty() ||
+                post_mime.find("text/") != std::string::npos ||
+                post_mime.find("json") != std::string::npos ||
+                post_mime.find("xml") != std::string::npos ||
+                post_mime.find("form-urlencoded") != std::string::npos ||
+                post_mime.find("javascript") != std::string::npos;
+
+            if (is_text) {
+                CefPostData::ElementVector elements;
+                pd->GetElements(elements);
+                std::string body_text;
+                for (auto& elem : elements) {
+                    if (elem->GetType() == PDE_TYPE_BYTES) {
+                        size_t sz = elem->GetBytesCount();
+                        if (sz > 0 && sz <= 512 * 1024) { // Cap at 512KB for text
+                            std::vector<char> buf(sz);
+                            elem->GetBytes(sz, buf.data());
+                            body_text.append(buf.data(), sz);
+                        }
+                    }
+                }
+                // Validate UTF-8 — skip if binary
+                bool valid_utf8 = true;
+                for (size_t i = 0; i < body_text.size(); ++i) {
+                    unsigned char c = static_cast<unsigned char>(body_text[i]);
+                    if (c == 0) { valid_utf8 = false; break; }
+                    if (c < 0x20 && c != '\n' && c != '\r' && c != '\t') {
+                        valid_utf8 = false; break;
+                    }
+                }
+                if (valid_utf8 && !body_text.empty()) {
+                    post_data = {
+                        {"mimeType", post_mime},
+                        {"text", body_text}
+                    };
+                }
+            }
+        }
+
+        json har_entry = {
+            {"requestId", request_id},
+            {"startedDateTime", iso_time},
+            {"time", total_time},
+            {"request", {
+                {"method", method},
+                {"url", url},
+                {"httpVersion", "HTTP/1.1"},
+                {"headers", req_header_arr},
+                {"queryString", query_arr},
+                {"headersSize", -1},
+                {"bodySize", post_data.is_null() ? -1 : static_cast<int>(post_data["text"].get<std::string>().size())},
+            }},
+            {"response", {
+                {"status", status_code},
+                {"statusText", status_text},
+                {"httpVersion", "HTTP/1.1"},
+                {"headers", resp_header_arr},
+                {"content", {
+                    {"size", received_content_length},
+                    {"mimeType", mime},
+                }},
+                {"headersSize", -1},
+                {"bodySize", received_content_length},
+            }},
+            {"timings", {
+                {"blocked", 0},
+                {"dns", 0},
+                {"connect", 0},
+                {"ssl", 0},
+                {"send", 0},
+                {"wait", total_time > 0 ? total_time : 0},
+                {"receive", 0},
+            }},
+        };
+
+        // Add resourceType
+        har_entry["resourceType"] = resource_type;
+
+        // Add postData if present
+        if (!post_data.is_null()) {
+            har_entry["request"]["postData"] = post_data;
+        }
+
+        event_bridge_->push_capture_update(har_entry);
+    }
 }
 
 }  // namespace shieldtier

@@ -32,9 +32,20 @@ public:
     void push_navigation_state(bool can_back, bool can_forward, bool loading,
                                const std::string& url,
                                const std::string& title);
+    void push_load_error(int code, const std::string& text,
+                         const std::string& url);
+
+    void push_screenshot(const std::string& url);
+    void push_dom_snapshot(const json& snapshot);
+    void push_email_parsed(const json& email);
+    void push_log_progress(const std::string& id,
+                           const std::string& file_name,
+                           const std::string& status);
+    void push_log_complete(const std::string& id, const json& result);
+
+    void push(const std::string& event, const json& data);
 
 private:
-    void push(const std::string& event, const json& data);
 
     CefRefPtr<CefBrowser> browser_;
     std::mutex mutex_;

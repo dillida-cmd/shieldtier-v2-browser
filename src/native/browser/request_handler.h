@@ -5,8 +5,12 @@
 #include "include/wrapper/cef_message_router.h"
 
 #include <functional>
+#include <unordered_map>
+#include <chrono>
+#include <mutex>
 
 #include "ipc/event_bridge.h"
+#include "capture/capture_manager.h"
 
 namespace shieldtier {
 
@@ -28,6 +32,8 @@ public:
 
     void set_session_manager(SessionManager* sm) { session_manager_ = sm; }
     void set_message_handler(MessageHandler* mh) { message_handler_ = mh; }
+    void set_capture_manager(CaptureManager* cm) { capture_manager_ = cm; }
+    void set_ui_browser_id(int id) { ui_browser_id_ = id; }
 
     // CefRequestHandler
     bool OnBeforeBrowse(CefRefPtr<CefBrowser> browser,
@@ -63,11 +69,25 @@ public:
         CefRefPtr<CefRequest> request,
         CefRefPtr<CefResponse> response) override;
 
+    void OnResourceLoadComplete(
+        CefRefPtr<CefBrowser> browser,
+        CefRefPtr<CefFrame> frame,
+        CefRefPtr<CefRequest> request,
+        CefRefPtr<CefResponse> response,
+        URLRequestStatus status,
+        int64_t received_content_length) override;
+
 private:
     CefRefPtr<CefMessageRouterBrowserSide> message_router_;
     shieldtier::EventBridge* event_bridge_ = nullptr;
     SessionManager* session_manager_ = nullptr;
     MessageHandler* message_handler_ = nullptr;
+    CaptureManager* capture_manager_ = nullptr;
+    int ui_browser_id_ = -1;
+
+    // Track request start times for timing calculation
+    std::mutex timing_mutex_;
+    std::unordered_map<std::string, int64_t> request_start_times_;
 
     IMPLEMENT_REFCOUNTING(RequestHandler);
     DISALLOW_COPY_AND_ASSIGN(RequestHandler);

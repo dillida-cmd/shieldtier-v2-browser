@@ -1,27 +1,561 @@
-import { WorkspaceRoot } from './components/workspace/WorkspaceRoot';
-import { TooltipProvider } from './components/ui/Tooltip';
-import { useAnalysisPolling } from './hooks/useAnalysis';
-import { useCapturePolling } from './hooks/useCapture';
-import { useThreatLevel } from './hooks/useThreatLevel';
-import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import type { InvestigationSession, ProxyConfig, AuthUser, AuthState, UpdateState } from './types';
+import { Sidebar } from './components/Sidebar';
+import { Workspace } from './components/Workspace';
+import { ProxyModal } from './components/ProxyModal';
+import { TopBar } from './components/TopBar';
+import { CaseNameModal } from './components/CaseNameModal';
+import { LoginScreen } from './components/LoginScreen';
+import { SettingsPage } from './components/SettingsPage';
+import ChatPanel from './components/ChatPanel';
+
+class PanelErrorBoundary extends React.Component<{children: React.ReactNode; name?: string}, {hasError: boolean; error?: string}> {
+  state: {hasError: boolean; error?: string} = { hasError: false };
+  static getDerivedStateFromError(error: Error) { return { hasError: true, error: error.message }; }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex items-center justify-center h-full p-4">
+          <div className="text-center">
+            <p className="text-xs text-[color:var(--st-text-muted)] mb-2">
+              {this.props.name || 'Panel'} failed to load.
+            </p>
+            <p className="text-[10px] text-[color:var(--st-text-muted)] font-mono mb-3 opacity-60">
+              {this.state.error}
+            </p>
+            <button
+              onClick={() => this.setState({ hasError: false, error: undefined })}
+              className="text-xs text-[color:var(--st-accent)] underline cursor-pointer"
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+import { ThreatLevelProvider } from './contexts/ThreatLevelContext';
 import { CommandPalette } from './components/CommandPalette';
-import { CaseNameModal } from './components/modals/CaseNameModal';
-import { SettingsModal } from './components/modals/SettingsModal';
-import { ExportModal } from './components/modals/ExportModal';
+import { useCommandPalette } from './hooks/useCommandPalette';
+import { Dashboard } from './components/dashboard/Dashboard';
+import { Button } from './components/ui/button';
 
-export function App() {
-  useAnalysisPolling();
-  useCapturePolling();
-  useThreatLevel();
-  useKeyboardShortcuts();
+function formatProxyStatus(config: ProxyConfig): string {
+  return config.type === 'direct'
+    ? 'Direct connection (no proxy)'
+    : `Proxy: ${config.type}://${config.host}:${config.port} ${config.region ? `(${config.region})` : ''}`;
+}
 
+export default function App() {
+  const [sessions, setSessions] = useState<InvestigationSession[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [proxyConfig, setProxyConfig] = useState<ProxyConfig | null>(null);
+  const [showProxyModal, setShowProxyModal] = useState(false);
+  const [showCaseNameModal, setShowCaseNameModal] = useState(false);
+  const [pendingCaseId, setPendingCaseId] = useState('');
+  const [showCloseConfirm, setShowCloseConfirm] = useState<string | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [authState, setAuthState] = useState<AuthState>('checking');
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [avatar, setAvatar] = useState(localStorage.getItem('shieldtier-avatar') || 'shield');
+  const [status, setStatus] = useState<string>('No proxy configured');
+
+  // Chat state — app-level so it's always available
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatHeight, setChatHeight] = useState(() => {
+    const saved = localStorage.getItem('shieldtier-chat-height');
+    return saved ? parseInt(saved, 10) || 300 : 300;
+  });
+  const [chatResizing, setChatResizing] = useState(false);
+  const chatUnreadRef = useRef(0);
+  const [chatUnread, setChatUnread] = useState(0);
+
+  // Auto-update state
+  const [updateState, setUpdateState] = useState<UpdateState | null>(null);
+
+  const activeSession = sessions.find(s => s.id === activeSessionId) || null;
+  const analystName = authUser?.analystName || '';
+
+  // Track chat unread count — always active when authenticated
+  useEffect(() => {
+    if (authState !== 'authenticated') return;
+    const unsub = window.shieldtier.chat.onMessageReceived(() => {
+      if (!chatOpen) {
+        chatUnreadRef.current++;
+        setChatUnread(chatUnreadRef.current);
+      }
+    });
+    return () => { unsub(); };
+  }, [chatOpen, authState]);
+
+  const handleToggleChat = useCallback(() => {
+    setChatOpen(prev => {
+      if (!prev) {
+        // Opening chat — reset unread
+        chatUnreadRef.current = 0;
+        setChatUnread(0);
+      }
+      return !prev;
+    });
+  }, []);
+
+  // Apply UI preferences (theme, font) on mount — runs before auth to prevent flash
+  useEffect(() => {
+    (async () => {
+      try {
+        const uiPrefs = await window.shieldtier.config.get('ui');
+        if (uiPrefs) {
+          // Theme
+          const theme = uiPrefs.theme || 'dark';
+          document.documentElement.setAttribute('data-theme', theme);
+
+          // Font size
+          const sizeMap: Record<string, number> = { small: 13, default: 14, large: 16 };
+          const px = sizeMap[uiPrefs.fontSize] ?? 14;
+          document.documentElement.style.setProperty('--st-font-size-base', `${px}px`);
+
+          // Font family
+          if (uiPrefs.fontFamily === 'system') {
+            document.documentElement.style.setProperty(
+              '--font-sans',
+              "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+            );
+          }
+        }
+      } catch {}
+    })();
+  }, []);
+
+  // Restore session on mount: try auth restore, then proxy + chat
+  useEffect(() => {
+    (async () => {
+      try {
+        // Attempt to restore cloud auth session
+        const authResult = await window.shieldtier.auth.restoreSession();
+        if (authResult.success && authResult.user) {
+          setAuthUser(authResult.user);
+          setAuthState('authenticated');
+
+          // Fetch fresh profile from server (avatar, emailVerified, etc.)
+          try {
+            const freshProfile = await window.shieldtier.auth.refreshProfile();
+            if (freshProfile.success && freshProfile.user) {
+              setAuthUser(freshProfile.user);
+              if (freshProfile.user.avatar) {
+                setAvatar(freshProfile.user.avatar);
+                localStorage.setItem('shieldtier-avatar', freshProfile.user.avatar);
+              }
+            }
+          } catch {}
+        } else {
+          setAuthState('unauthenticated');
+          return; // Don't load other config until authenticated
+        }
+
+        // Restore proxy config and chat identity
+        const [saved] = await Promise.all([
+          window.shieldtier.config.getProxyConfig(),
+          window.shieldtier.chat.getIdentity().catch(() => null),
+        ]);
+        if (saved) {
+          setProxyConfig(saved);
+          setStatus(formatProxyStatus(saved));
+        }
+      } catch {
+        setAuthState('unauthenticated');
+      }
+    })();
+  }, []);
+
+  // Listen for session expiry
+  useEffect(() => {
+    const cleanup = window.shieldtier.auth.onSessionExpired(() => {
+      setAuthState('unauthenticated');
+      setAuthUser(null);
+    });
+    return cleanup;
+  }, []);
+
+  // Auto-check for updates after auth + listen for status events
+  useEffect(() => {
+    if (authState !== 'authenticated') return;
+    window.shieldtier.update.check().catch(() => {});
+    const unsub = window.shieldtier.update.onStatus((state: UpdateState) => {
+      setUpdateState(state);
+    });
+    return unsub;
+  }, [authState]);
+
+  const handleAuthenticated = useCallback(async (user: AuthUser) => {
+    setAuthUser(user);
+    setAuthState('authenticated');
+    // Load avatar from server profile
+    if (user.avatar) {
+      setAvatar(user.avatar);
+      localStorage.setItem('shieldtier-avatar', user.avatar);
+    }
+
+    // Now load proxy config and chat identity
+    try {
+      const saved = await window.shieldtier.config.getProxyConfig();
+      if (saved) {
+        setProxyConfig(saved);
+        setStatus(formatProxyStatus(saved));
+      }
+    } catch {}
+  }, []);
+
+  const handleLogout = useCallback(async () => {
+    try {
+      await window.shieldtier.auth.logout();
+    } catch {}
+    setAuthUser(null);
+    setAuthState('unauthenticated');
+    setSessions([]);
+    setActiveSessionId(null);
+    setChatOpen(false);
+    setShowSettings(false);
+  }, []);
+
+  const handleNewSession = useCallback(async () => {
+    if (!proxyConfig) {
+      setShowProxyModal(true);
+      return;
+    }
+    const nextId = await window.shieldtier.config.peekNextCaseId();
+    setPendingCaseId(nextId);
+    setShowCaseNameModal(true);
+  }, [proxyConfig]);
+
+  const handleCreateSessionWithName = useCallback(async (caseName: string) => {
+    setShowCaseNameModal(false);
+    try {
+      const session = await window.shieldtier.session.create({ caseName });
+      setSessions(prev => [...prev, session]);
+      setActiveSessionId(session.id);
+      setStatus(`Session created: ${caseName}`);
+    } catch (err: any) {
+      setStatus(`Error: ${err.message}`);
+    }
+  }, []);
+
+  const handleRequestDestroySession = useCallback((sessionId: string) => {
+    setShowCloseConfirm(sessionId);
+  }, []);
+
+  const handleDestroySession = useCallback(async (sessionId: string) => {
+    setShowCloseConfirm(null);
+    try {
+      await window.shieldtier.session.destroy(sessionId);
+      setSessions(prev => {
+        const remaining = prev.filter(s => s.id !== sessionId);
+        setActiveSessionId(prevActive =>
+          prevActive === sessionId ? (remaining[0]?.id || null) : prevActive
+        );
+        return remaining;
+      });
+      setStatus(`Session ${sessionId.slice(0, 8)} destroyed — all data wiped`);
+    } catch (err: any) {
+      setStatus(`Error destroying session: ${err.message}`);
+    }
+  }, []);
+
+  const handleSaveAndClose = useCallback(async (sessionId: string) => {
+    setShowCloseConfirm(null);
+    const session = sessions.find(s => s.id === sessionId);
+    const label = session?.caseName || sessionId.slice(0, 8);
+    setStatus(`Exporting session "${label}"...`);
+    try {
+      const result = await window.shieldtier.report.generate({
+        sessionId,
+        format: 'zip',
+        title: `Session Export — ${label}`,
+        analystName,
+        analystNotes: 'Auto-saved on session close.',
+        sections: {
+          networkAnalysis: true,
+          iocIntelligence: true,
+          fileAnalysis: true,
+          visualEvidence: true,
+          timeline: true,
+        },
+        options: {
+          includeScreenshots: true,
+          includeDOMSnapshots: true,
+          includeRawHAR: true,
+        },
+        timelineEvents: [],
+      });
+      if (result.success) {
+        setStatus(`Session "${label}" saved and exported`);
+      } else {
+        setStatus(`Export error: ${result.error}`);
+      }
+    } catch (err: any) {
+      setStatus(`Export error: ${err.message}`);
+    }
+    await handleDestroySession(sessionId);
+  }, [sessions, analystName, handleDestroySession]);
+
+  const handleProxyConfigured = useCallback(async (config: ProxyConfig) => {
+    try {
+      const result = await window.shieldtier.proxy.configure(config);
+      if (result.success) {
+        setProxyConfig(config);
+        setShowProxyModal(false);
+        setStatus(formatProxyStatus(config));
+      }
+    } catch (err: any) {
+      setStatus(`Proxy error: ${err.message}`);
+    }
+  }, []);
+
+  // Settings proxy handler — configures proxy from settings page
+  const handleSettingsProxyConfigured = useCallback(async (config: ProxyConfig) => {
+    await handleProxyConfigured(config);
+  }, [handleProxyConfigured]);
+
+  const anyModalOpen = showProxyModal || showCaseNameModal || showCloseConfirm !== null || showSettings;
+
+  // Command Palette (Cmd+K)
+  const cmdPalette = useCommandPalette({
+    onNewSession: handleNewSession,
+    onOpenSettings: () => setShowSettings(true),
+    onConfigureProxy: () => setShowProxyModal(true),
+    onToggleChat: handleToggleChat,
+    hasActiveSession: !!activeSession,
+  });
+
+  // Threat signals — derived from active session data.
+  // Workspace will populate these once component migration (Phase 6) wires them.
+  const threatSignals = useMemo(() => ({
+    iocVerdicts: [] as any[],
+    fileRiskLevels: [] as any[],
+    sandboxScores: [] as number[],
+    phishingVerdict: null,
+    threatFeedMatches: 0,
+  }), []);
+
+  // ── Auth States ──
+
+  // Checking — show nothing (or splash)
+  if (authState === 'checking') {
+    return (
+      <div className="flex items-center justify-center h-screen bg-[color:var(--st-bg-base)]" role="status" aria-live="polite">
+        <div className="text-center">
+          <div className="flex justify-center mb-4">
+            <svg width="48" height="48" viewBox="0 0 32 32" fill="none" className="animate-pulse">
+              <path d="M16 2L4 8v8c0 7.7 5.1 14.9 12 16 6.9-1.1 12-8.3 12-16V8L16 2z" fill="var(--st-info)" opacity="0.2"/>
+              <path d="M16 2L4 8v8c0 7.7 5.1 14.9 12 16 6.9-1.1 12-8.3 12-16V8L16 2z" stroke="var(--st-info)" strokeWidth="1.5" fill="none"/>
+            </svg>
+          </div>
+          <p className="text-xs text-[color:var(--st-text-muted)]">Loading ShieldTier...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Unauthenticated — show login screen
+  if (authState === 'unauthenticated') {
+    return <LoginScreen onAuthenticated={handleAuthenticated} />;
+  }
+
+  // Authenticated — full app
   return (
-    <TooltipProvider delayDuration={300}>
-      <WorkspaceRoot />
-      <CommandPalette />
-      <CaseNameModal />
-      <SettingsModal />
-      <ExportModal />
-    </TooltipProvider>
+    <ThreatLevelProvider signals={threatSignals}>
+    <div className="flex flex-col h-screen bg-[color:var(--st-bg-base)]">
+      <TopBar
+        proxyConfig={proxyConfig}
+        status={status}
+        analystName={analystName}
+        avatar={avatar}
+        chatOpen={chatOpen}
+        chatUnread={chatUnread}
+        onConfigureProxy={() => setShowProxyModal(true)}
+        onLogout={handleLogout}
+        onOpenSettings={() => setShowSettings(true)}
+        onToggleChat={handleToggleChat}
+      />
+
+      {/* Auto-update notification banner */}
+      {updateState?.status === 'available' && (
+        <div className="flex items-center justify-between px-4 py-1.5 bg-[color:var(--st-info)]/90 text-white text-xs">
+          <span>ShieldTier v{updateState.availableVersion} is available</span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 text-xs text-white hover:bg-white/20"
+            onClick={() => window.shieldtier.update.download()}
+          >
+            Download
+          </Button>
+        </div>
+      )}
+      {updateState?.status === 'downloading' && (
+        <div className="flex items-center gap-3 px-4 py-1.5 bg-[color:var(--st-info)]/90 text-white text-xs">
+          <span>Downloading update... {updateState.downloadProgress}%</span>
+          <div className="flex-1 max-w-xs h-1 bg-white/20 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-white rounded-full transition-all duration-300"
+              role="progressbar"
+              aria-valuenow={updateState.downloadProgress}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              style={{ width: `${updateState.downloadProgress}%` }}
+            />
+          </div>
+        </div>
+      )}
+      {updateState?.status === 'downloaded' && (
+        <div className="flex items-center justify-between px-4 py-1.5 bg-[color:var(--st-success)]/90 text-white text-xs">
+          <span>Update ready — restart to apply v{updateState.availableVersion}</span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 text-xs text-white hover:bg-white/20"
+            onClick={() => window.shieldtier.update.install()}
+          >
+            Restart &amp; Update
+          </Button>
+        </div>
+      )}
+
+      <div className="flex flex-1 overflow-hidden">
+        {sessions.length > 0 && (
+          <Sidebar
+            sessions={sessions}
+            activeSessionId={activeSessionId}
+            onSelectSession={(id) => { setShowSettings(false); setActiveSessionId(id); }}
+            onDestroySession={handleRequestDestroySession}
+            onNewSession={handleNewSession}
+          />
+        )}
+
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <main className="flex-1 overflow-hidden">
+            {showSettings && authUser ? (
+              <PanelErrorBoundary name="Settings"><SettingsPage
+                user={authUser}
+                avatar={avatar}
+                proxyConfig={proxyConfig}
+                onAvatarChange={(newAvatar) => {
+                  setAvatar(newAvatar);
+                  localStorage.setItem('shieldtier-avatar', newAvatar);
+                }}
+                onUserUpdated={(updatedUser) => setAuthUser(updatedUser)}
+                onProxyConfigured={handleSettingsProxyConfigured}
+                onClose={() => setShowSettings(false)}
+                onLogout={() => { setShowSettings(false); handleLogout(); }}
+              /></PanelErrorBoundary>
+            ) : activeSession ? (
+              <PanelErrorBoundary name="Workspace">
+                <Workspace session={activeSession} modalOpen={anyModalOpen || chatOpen} />
+              </PanelErrorBoundary>
+            ) : (
+              <PanelErrorBoundary name="Dashboard">
+                <Dashboard
+                  hasProxy={!!proxyConfig}
+                  analystName={analystName}
+                  sessionCount={sessions.length}
+                  onNewSession={handleNewSession}
+                  onConfigureProxy={() => setShowProxyModal(true)}
+                  onOpenSettings={() => setShowSettings(true)}
+                />
+              </PanelErrorBoundary>
+            )}
+          </main>
+
+          {/* Chat Panel — always available, independent of sessions */}
+          {chatOpen && !showSettings && (
+            <PanelErrorBoundary name="Chat">
+              <ChatPanel
+                height={chatHeight}
+                onResize={(h) => {
+                  setChatHeight(h);
+                  localStorage.setItem('shieldtier-chat-height', String(h));
+                }}
+                onResizeStart={() => setChatResizing(true)}
+                onResizeEnd={() => setChatResizing(false)}
+                collapsed={false}
+                onToggleCollapse={() => setChatOpen(false)}
+              />
+            </PanelErrorBoundary>
+          )}
+        </div>
+      </div>
+
+      {showProxyModal && (
+        <ProxyModal
+          currentConfig={proxyConfig}
+          onSave={handleProxyConfigured}
+          onClose={() => setShowProxyModal(false)}
+        />
+      )}
+
+      {showCaseNameModal && (
+        <CaseNameModal
+          caseId={pendingCaseId}
+          onSubmit={handleCreateSessionWithName}
+          onCancel={() => setShowCaseNameModal(false)}
+        />
+      )}
+
+      {showCloseConfirm !== null && (
+        <CloseConfirmModal
+          sessionId={showCloseConfirm}
+          caseName={sessions.find(s => s.id === showCloseConfirm)?.caseName}
+          onSaveAndClose={() => handleSaveAndClose(showCloseConfirm)}
+          onCloseWithoutSaving={() => handleDestroySession(showCloseConfirm)}
+          onCancel={() => setShowCloseConfirm(null)}
+        />
+      )}
+
+      <CommandPalette
+        open={cmdPalette.open}
+        onOpenChange={cmdPalette.setOpen}
+        commands={cmdPalette.commands}
+      />
+    </div>
+    </ThreatLevelProvider>
   );
 }
+
+function CloseConfirmModal({ sessionId, caseName, onSaveAndClose, onCloseWithoutSaving, onCancel }: {
+  sessionId: string;
+  caseName?: string;
+  onSaveAndClose: () => void;
+  onCloseWithoutSaving: () => void;
+  onCancel: () => void;
+}) {
+  const label = caseName || `Session ${sessionId.slice(0, 8)}`;
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center animate-fade-in" onClick={onCancel}>
+      <div
+        className="glass rounded-xl border w-[400px] max-w-[90vw] dialog-enter"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="px-5 py-4">
+          <h3 className="text-sm font-semibold text-[color:var(--st-text-primary)] mb-2">Close Investigation</h3>
+          <p className="text-xs text-[color:var(--st-text-secondary)]">
+            Save session data for <span className="text-[color:var(--st-text-primary)] font-medium">"{label}"</span> locally before closing?
+          </p>
+        </div>
+        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-white/8">
+          <Button variant="ghost" size="sm" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button size="sm" onClick={onSaveAndClose}>
+            Save & Close
+          </Button>
+          <Button variant="destructive" size="sm" onClick={onCloseWithoutSaving}>
+            Close Without Saving
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+

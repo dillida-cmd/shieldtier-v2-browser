@@ -1,6 +1,7 @@
 #include "config/config_store.h"
 
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 
@@ -17,18 +18,44 @@ ConfigStore::ConfigStore(const std::string& config_path)
 Result<json> ConfigStore::load() {
     std::lock_guard<std::mutex> lock(mutex_);
 
+    // Ensure parent directory exists
+    std::error_code ec;
+    auto parent = std::filesystem::path(config_path_).parent_path();
+    std::filesystem::create_directories(parent, ec);
+
+    if (!std::filesystem::exists(config_path_)) {
+        // First run — start with empty config, no error
+        config_ = json::object();
+        fprintf(stderr, "[ConfigStore] No config file at %s — starting fresh\n",
+                config_path_.c_str());
+        return config_;
+    }
+
     std::ifstream file(config_path_);
     if (!file.is_open()) {
-        return Error("Failed to open config file: " + config_path_, "file_not_found");
+        config_ = json::object();
+        fprintf(stderr, "[ConfigStore] Cannot open %s — starting fresh\n",
+                config_path_.c_str());
+        return config_;
     }
 
     std::stringstream buffer;
     buffer << file.rdbuf();
+    std::string content = buffer.str();
+
+    if (content.empty()) {
+        config_ = json::object();
+        fprintf(stderr, "[ConfigStore] Empty config file — starting fresh\n");
+        return config_;
+    }
 
     try {
-        config_ = json::parse(buffer.str());
+        config_ = json::parse(content);
     } catch (const json::parse_error& e) {
-        return Error(std::string("JSON parse error: ") + e.what(), "parse_error");
+        config_ = json::object();
+        fprintf(stderr, "[ConfigStore] Corrupt config (parse error: %s) — resetting\n",
+                e.what());
+        return config_;
     }
 
     return config_;
@@ -36,6 +63,10 @@ Result<json> ConfigStore::load() {
 
 Result<bool> ConfigStore::save() {
     std::lock_guard<std::mutex> lock(mutex_);
+    // Ensure parent directory exists before writing
+    std::error_code ec;
+    auto parent = std::filesystem::path(config_path_).parent_path();
+    std::filesystem::create_directories(parent, ec);
     return write_atomic(config_path_, config_.dump(4));
 }
 

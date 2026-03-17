@@ -1,53 +1,47 @@
-import { useRef, useEffect } from 'react';
+/**
+ * TimelinePanel — Investigation timeline display.
+ * macOS Instruments-inspired event list.
+ */
+
+import React from 'react';
 import { cn } from '../../lib/utils';
-import { useStore } from '../../store';
-import { EmptyState } from '../ui/EmptyState';
+import { ScrollArea } from '../ui/scroll-area';
+import { Badge } from '../ui/badge';
+import type { TimelineEvent } from './panel-types';
 
-const SEVERITY_DOT: Record<string, string> = {
-  critical: 'bg-[var(--st-severity-critical)]',
-  high: 'bg-[var(--st-severity-high)]',
-  medium: 'bg-[var(--st-severity-medium)]',
-  low: 'bg-[var(--st-severity-low)]',
-};
-
-export function TimelinePanel() {
-  const { vmEvents } = useStore();
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [vmEvents.length]);
-
+export function TimelinePanel({ events }: { events: TimelineEvent[] }) {
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center h-6 px-2 gap-2 border-b border-[var(--st-border)] flex-shrink-0">
-        <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--st-text-muted)]">Timeline</span>
-        <span className="text-[10px] font-mono text-[var(--st-text-label)]">{vmEvents.length}</span>
+      {/* Toolbar */}
+      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-[color:var(--st-border)]" style={{ background: 'var(--st-bg-toolbar)' }}>
+        <span className="text-[11px] font-semibold text-[color:var(--st-text-muted)] uppercase tracking-wider">Timeline</span>
+        <span className="w-px h-3 bg-[color:var(--st-border)]" />
+        <span className="text-[11px] text-[color:var(--st-text-muted)]">{events.length} events</span>
       </div>
-      <div ref={scrollRef} className="flex-1 overflow-auto">
-        {vmEvents.length === 0 ? (
-          <EmptyState message="No timeline events" submessage="VM events will appear chronologically here" />
+      {/* Event list */}
+      <ScrollArea className="flex-1">
+        {events.length === 0 ? (
+          <div className="flex items-center justify-center h-full text-[11px] text-[color:var(--st-text-muted)]">
+            No timeline events yet. Start browsing to generate events.
+          </div>
         ) : (
-          <div className="py-1">
-            {vmEvents.map((event, i) => (
-              <div key={i} className="flex items-start gap-2 px-2 py-1 hover:bg-[var(--st-bg-hover)] transition-colors">
-                <span className="text-[10px] font-mono text-[var(--st-text-muted)] flex-shrink-0 w-16 pt-0.5">{event.timestamp}</span>
-                <div className="flex flex-col items-center flex-shrink-0 pt-1">
-                  <div className={cn('w-2 h-2 rounded-full', event.severity ? SEVERITY_DOT[event.severity] : 'bg-[var(--st-text-muted)]')} />
-                  {i < vmEvents.length - 1 && <div className="w-px flex-1 bg-[var(--st-border)] min-h-3 mt-0.5" />}
-                </div>
+          <div className="divide-y divide-[color:var(--st-border)]">
+            {events.map((e, i) => (
+              <div key={`${e.time}-${e.event}-${i}`} className="flex items-start gap-3 px-3 py-2 hover:bg-[color:var(--st-border-subtle)] transition-colors">
+                <span className="text-[10px] text-[color:var(--st-text-muted)] font-mono w-[60px] shrink-0 pt-0.5 text-right">{e.time}</span>
+                <div className={cn(
+                  'w-1.5 h-1.5 rounded-full mt-1.5 shrink-0',
+                  e.type === 'danger' ? 'bg-[color:var(--st-danger)]' : e.type === 'warning' ? 'bg-[color:var(--st-warning)]' : 'bg-[color:var(--st-info)]'
+                )} />
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1">
-                    <span className="text-[10px] font-bold text-[var(--st-accent)] uppercase">[{event.category}]</span>
-                    <span className="text-[11px] font-mono text-[var(--st-text-primary)] truncate">{event.action}</span>
-                  </div>
-                  <div className="text-[10px] text-[var(--st-text-label)] truncate">{event.detail}</div>
+                  <p className="text-[12px] text-[color:var(--st-text-primary)]">{e.event}</p>
+                  <p className="text-[10px] text-[color:var(--st-text-muted)] truncate font-mono" title={e.detail}>{e.detail}</p>
                 </div>
               </div>
             ))}
           </div>
         )}
-      </div>
+      </ScrollArea>
     </div>
   );
 }

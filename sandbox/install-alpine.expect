@@ -1,0 +1,214 @@
+#!/usr/bin/expect -f
+# Automated Alpine Linux installation into QCOW2 for sandbox use.
+# Boots from ISO, installs to disk, configures auto-login + agent.
+
+set timeout 300
+set SANDBOX_DIR [file dirname [info script]]
+set ISO "$SANDBOX_DIR/images/alpine-virt-3.21.3-x86_64.iso"
+set DISK "$SANDBOX_DIR/images/alpine-base.qcow2"
+
+# Start QEMU
+spawn qemu-system-x86_64 \
+    -machine q35,accel=tcg \
+    -cpu qemu64 \
+    -m 512 \
+    -smp 2 \
+    -nographic \
+    -cdrom $ISO \
+    -drive file=$DISK,format=qcow2,if=virtio \
+    -netdev user,id=net0 \
+    -device virtio-net-pci,netdev=net0 \
+    -boot d
+
+# Wait for login prompt
+expect {
+    "localhost login:" {}
+    timeout { puts "TIMEOUT waiting for login"; exit 1 }
+}
+
+# Login as root
+send "root\r"
+expect "localhost:~#"
+
+# Setup networking (needed for apk during install)
+send "setup-interfaces -a\r"
+expect "localhost:~#"
+send "ifup eth0\r"
+expect "localhost:~#"
+sleep 2
+
+# Setup repositories
+send "setup-apkrepos -1\r"
+expect {
+    "localhost:~#" {}
+    timeout { puts "TIMEOUT on apkrepos"; exit 1 }
+}
+
+# Install to disk using setup-disk
+send "export ERASE_DISKS=/dev/vda\r"
+expect "localhost:~#"
+
+# Answer setup-alpine questions via environment
+send "setup-keymap us us\r"
+expect "localhost:~#"
+
+send "setup-hostname sandbox\r"
+expect "localhost:~#"
+
+send "setup-timezone -z UTC\r"
+expect "localhost:~#"
+
+# Setup root password (empty for auto-login)
+send "passwd -d root\r"
+expect "#"
+
+# Install Alpine to disk
+send "setup-disk -m sys -s 0 /dev/vda\r"
+expect {
+    "WARNING" { send "y\r"; exp_continue }
+    "Erase" { send "y\r"; exp_continue }
+    "#" {}
+    timeout { puts "TIMEOUT on setup-disk"; exit 1 }
+}
+
+# Mount the installed system and configure it
+send "mount /dev/vda3 /mnt\r"
+expect "#"
+send "mount /dev/vda1 /mnt/boot\r"
+expect "#"
+
+# Install strace and busybox extras into the installed system
+send "chroot /mnt apk add strace procps lsof\r"
+expect {
+    "#" {}
+    timeout { puts "TIMEOUT on apk add"; exit 1 }
+}
+
+# Create the sandbox agent script
+send "cat > /mnt/usr/local/bin/sandbox-agent.sh << 'AGENT'\r"
+expect ">"
+send "#!/bin/sh\r"
+expect ">"
+send "# ShieldTier Sandbox Agent — monitors /mnt/samples and executes+traces\r"
+expect ">"
+send "SAMPLE_DIR=/mnt/hostshare/samples\r"
+expect ">"
+send "RESULT_DIR=/mnt/hostshare/results\r"
+expect ">"
+send "mkdir -p \$SAMPLE_DIR \$RESULT_DIR 2>/dev/null\r"
+expect ">"
+send "echo \"\\[agent\\] ShieldTier sandbox agent started at \\$(date -u)\" > \$RESULT_DIR/agent.log\r"
+expect ">"
+send "echo \"\\[agent\\] Waiting for samples in \$SAMPLE_DIR\" >> \$RESULT_DIR/agent.log\r"
+expect ">"
+send "while true; do\r"
+expect ">"
+send "  for f in \$SAMPLE_DIR/*; do\r"
+expect ">"
+send "    \\[ -f \"\$f\" \\] || continue\r"
+expect ">"
+send "    \\[ -f \"\$f.done\" \\] && continue\r"
+expect ">"
+send "    BASENAME=\\$(basename \"\$f\")\r"
+expect ">"
+send "    echo \"\\[agent\\] Analyzing: \$BASENAME\" >> \$RESULT_DIR/agent.log\r"
+expect ">"
+send "    echo \"\\[agent\\] File info:\" >> \$RESULT_DIR/agent.log\r"
+expect ">"
+send "    file \"\$f\" >> \$RESULT_DIR/agent.log 2>&1\r"
+expect ">"
+send "    ls -la \"\$f\" >> \$RESULT_DIR/agent.log 2>&1\r"
+expect ">"
+send "    echo \"\\[agent\\] Strings:\" >> \$RESULT_DIR/\$BASENAME.strings\r"
+expect ">"
+send "    strings \"\$f\" > \$RESULT_DIR/\$BASENAME.strings 2>&1\r"
+expect ">"
+send "    cp \"\$f\" /tmp/sample_exec\r"
+expect ">"
+send "    chmod +x /tmp/sample_exec\r"
+expect ">"
+send "    echo \"\\[agent\\] Executing under strace (30s timeout)...\" >> \$RESULT_DIR/agent.log\r"
+expect ">"
+send "    timeout 30 strace -f -e trace=all -o \$RESULT_DIR/\$BASENAME.strace /tmp/sample_exec > \$RESULT_DIR/\$BASENAME.stdout 2>\$RESULT_DIR/\$BASENAME.stderr &\r"
+expect ">"
+send "    EXEC_PID=\\$!\r"
+expect ">"
+send "    sleep 5\r"
+expect ">"
+send "    echo \"\\[agent\\] Process tree:\" >> \$RESULT_DIR/agent.log\r"
+expect ">"
+send "    ps auxf >> \$RESULT_DIR/agent.log 2>&1\r"
+expect ">"
+send "    echo \"\\[agent\\] Network connections:\" >> \$RESULT_DIR/agent.log\r"
+expect ">"
+send "    netstat -tulnp >> \$RESULT_DIR/agent.log 2>&1 || ss -tulnp >> \$RESULT_DIR/agent.log 2>&1\r"
+expect ">"
+send "    echo \"\\[agent\\] Open files:\" >> \$RESULT_DIR/agent.log\r"
+expect ">"
+send "    lsof -p \\$EXEC_PID >> \$RESULT_DIR/agent.log 2>&1\r"
+expect ">"
+send "    wait \\$EXEC_PID 2>/dev/null\r"
+expect ">"
+send "    echo \"\\[agent\\] Execution complete for \$BASENAME (exit: \\$?)\" >> \$RESULT_DIR/agent.log\r"
+expect ">"
+send "    rm -f /tmp/sample_exec\r"
+expect ">"
+send "    touch \"\$f.done\"\r"
+expect ">"
+send "    echo \"\\[agent\\] Results saved\" >> \$RESULT_DIR/agent.log\r"
+expect ">"
+send "  done\r"
+expect ">"
+send "  sleep 2\r"
+expect ">"
+send "done\r"
+expect ">"
+send "AGENT\r"
+expect "#"
+
+send "chmod +x /mnt/usr/local/bin/sandbox-agent.sh\r"
+expect "#"
+
+# Configure auto-login on ttyS0 (serial console) and auto-start agent
+send "mkdir -p /mnt/etc/local.d\r"
+expect "#"
+
+send "cat > /mnt/etc/local.d/sandbox-agent.start << 'BOOT'\r"
+expect ">"
+send "#!/bin/sh\r"
+expect ">"
+send "# Mount 9p hostshare if available\r"
+expect ">"
+send "mkdir -p /mnt/hostshare\r"
+expect ">"
+send "mount -t 9p -o trans=virtio,version=9p2000.L hostshare /mnt/hostshare 2>/dev/null\r"
+expect ">"
+send "# Start sandbox agent in background\r"
+expect ">"
+send "/usr/local/bin/sandbox-agent.sh &\r"
+expect ">"
+send "BOOT\r"
+expect "#"
+
+send "chmod +x /mnt/etc/local.d/sandbox-agent.start\r"
+expect "#"
+
+# Enable local scripts on boot
+send "chroot /mnt rc-update add local default\r"
+expect "#"
+
+# Configure auto-login on serial console (no password prompt)
+send "sed -i 's|^ttyS0.*|ttyS0::respawn:/bin/login -f root|' /mnt/etc/inittab\r"
+expect "#"
+
+# Unmount
+send "umount /mnt/boot\r"
+expect "#"
+send "umount /mnt\r"
+expect "#"
+
+# Power off
+send "poweroff\r"
+expect eof
+
+puts "\n=== Alpine installation complete ==="

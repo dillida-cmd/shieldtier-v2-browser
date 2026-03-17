@@ -1,0 +1,205 @@
+/* ═══════════════════════════════════════════════════════════
+   ShieldTier™ — Micro-Animations
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── Panel Transitions ──
+   Smooth opacity + transform on tab/panel switch */
+
+@utility panel-enter {
+  animation: panel-enter 0.2s ease both;
+}
+
+@keyframes panel-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@utility panel-exit {
+  animation: panel-exit 0.15s ease both;
+}
+
+@keyframes panel-exit {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+/* ── Threat Level Shift ──
+   Smooth color temperature transitions when threat level changes.
+   The CSS custom properties in index.css transition via the 1.5s ease rule.
+   This adds a subtle pulse when the level escalates. */
+
+@utility threat-escalate {
+  animation: threat-escalate 0.6s ease;
+}
+
+@keyframes threat-escalate {
+  0% { filter: brightness(1); }
+  30% { filter: brightness(1.15); }
+  100% { filter: brightness(1); }
+}
+
+/* ── Badge Count Pulse ──
+   Scale bounce when badge value changes (applied via usePrevious) */
+
+@utility badge-pop {
+  animation: badge-pop 0.3s ease;
+}
+
+/* badge-pop keyframes defined in index.css */
+
+/* ── Score Gauge Fill ──
+   Conic gradient animated from 0 to value on mount.
+   Usage: style={{ '--score-progress': '0.75' }} + class="score-gauge" */
+
+@utility score-gauge {
+  background: conic-gradient(
+    var(--st-accent) calc(var(--score-progress, 0) * 360deg),
+    rgba(255, 255, 255, 0.05) 0
+  );
+  border-radius: 9999px;
+  transition: --score-progress 1s ease;
+}
+
+@property --score-progress {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+
+/* ── Loading Shimmer ──
+   Gradient slide for skeleton loading states.
+   shimmer utility defined in index.css */
+
+/* ── Threat Pulse ──
+   App shell border glow when data-threat="malicious".
+   threat-glow utility defined in index.css */
+
+/* ── Modal / Overlay Animations ── */
+
+@utility overlay-enter {
+  animation: overlay-enter 0.2s ease both;
+}
+
+@keyframes overlay-enter {
+  from {
+    opacity: 0;
+    backdrop-filter: blur(0);
+  }
+  to {
+    opacity: 1;
+    backdrop-filter: blur(4px);
+  }
+}
+
+@utility dialog-enter {
+  animation: dialog-enter 0.2s ease both;
+}
+
+@keyframes dialog-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* ── List Item Stagger ──
+   For staggered list animations, use CSS custom property --item-index */
+
+@utility stagger-in {
+  animation: stagger-item 0.2s ease both;
+  animation-delay: calc(var(--item-index, 0) * 40ms);
+}
+
+@keyframes stagger-item {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* ── Collapse / Expand ── */
+
+@utility collapse-enter {
+  animation: collapse-enter 0.2s ease both;
+  overflow: hidden;
+}
+
+@keyframes collapse-enter {
+  from {
+    max-height: 0;
+    opacity: 0;
+  }
+  to {
+    max-height: 1000px;
+    opacity: 1;
+  }
+}
+
+/* ── Spinner ── */
+
+@utility spin-slow {
+  animation: spin 2s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* ── Pulse Ring (for active indicators) ──
+   Apply .pulse-ring class — uses regular CSS, not @utility (needs pseudo-element) */
+
+.pulse-ring {
+  position: relative;
+}
+
+.pulse-ring::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  border: 2px solid var(--st-accent);
+  opacity: 0;
+  animation: pulse-ring-anim 2s ease-in-out infinite;
+}
+
+@keyframes pulse-ring-anim {
+  0%, 100% { opacity: 0; transform: scale(1); }
+  50% { opacity: 0.3; transform: scale(1.05); }
+}
+
+/* ── Reduced Motion ──
+   Respect prefers-reduced-motion: disable all animations/transitions */
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .pulse-ring::after {
+    animation: none;
+  }
+}

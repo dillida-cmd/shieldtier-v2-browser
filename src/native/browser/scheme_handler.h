@@ -10,7 +10,7 @@ namespace shieldtier {
 
 class SchemeHandler : public CefResourceHandler {
 public:
-    explicit SchemeHandler(const std::string& root_dir);
+    SchemeHandler(const std::string& root_dir, const std::string& shim_dir);
 
     bool Open(CefRefPtr<CefRequest> request, bool& handle_request,
               CefRefPtr<CefCallback> callback) override;
@@ -28,6 +28,7 @@ private:
     static std::string get_mime_type(const std::string& extension);
 
     std::string root_dir_;
+    std::string shim_dir_;
     std::vector<uint8_t> data_;
     size_t offset_ = 0;
     std::string mime_type_ = "text/html";
@@ -39,7 +40,7 @@ private:
 
 class SchemeHandlerFactory : public CefSchemeHandlerFactory {
 public:
-    explicit SchemeHandlerFactory(const std::string& root_dir);
+    SchemeHandlerFactory(const std::string& root_dir, const std::string& shim_dir);
 
     CefRefPtr<CefResourceHandler> Create(
         CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
@@ -48,6 +49,7 @@ public:
 
 private:
     std::string root_dir_;
+    std::string shim_dir_;
 
     IMPLEMENT_REFCOUNTING(SchemeHandlerFactory);
     DISALLOW_COPY_AND_ASSIGN(SchemeHandlerFactory);

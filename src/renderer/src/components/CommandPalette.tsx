@@ -1,199 +1,129 @@
+import React, { useMemo } from 'react';
 import { Command } from 'cmdk';
-import { useStore } from '../store';
-import type { BottomTab, LayoutPreset } from '../store';
+import type { CommandItem } from '../hooks/useCommandPalette';
 
-const NAV_ITEMS: { label: string; tab: BottomTab; shortcut: string }[] = [
-  { label: 'Network Panel', tab: 'network', shortcut: '1' },
-  { label: 'IOC Panel', tab: 'ioc', shortcut: '2' },
-  { label: 'Screenshots', tab: 'screenshots', shortcut: '3' },
-  { label: 'Files', tab: 'files', shortcut: '4' },
-  { label: 'Sandbox', tab: 'sandbox', shortcut: '5' },
-  { label: 'Findings', tab: 'findings', shortcut: '6' },
-  { label: 'MITRE ATT&CK', tab: 'mitre', shortcut: '7' },
-  { label: 'Activity', tab: 'activity', shortcut: '8' },
-  { label: 'Timeline', tab: 'timeline', shortcut: '9' },
-  { label: 'Process Tree', tab: 'process', shortcut: '0' },
-];
-
-const LAYOUT_ITEMS: { label: string; preset: LayoutPreset }[] = [
-  { label: 'Browser Layout', preset: 'brw' },
-  { label: 'Email Layout', preset: 'eml' },
-  { label: 'Malware Layout', preset: 'mal' },
-  { label: 'Log Layout', preset: 'log' },
-];
-
-function ShortcutBadge({ keys }: { keys: string }) {
-  return (
-    <span
-      className="ml-auto text-[10px] font-mono tracking-wide"
-      style={{ color: 'var(--st-text-muted)' }}
-    >
-      {keys}
-    </span>
-  );
+interface CommandPaletteProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  commands: CommandItem[];
 }
 
-export function CommandPalette() {
-  const modalState = useStore((s) => s.modalState);
-  const setModalState = useStore((s) => s.setModalState);
-  const setBottomPrimaryTab = useStore((s) => s.setBottomPrimaryTab);
-  const setPreset = useStore((s) => s.setPreset);
+const CATEGORY_LABELS: Record<string, string> = {
+  navigation: 'Navigation',
+  session: 'Session',
+  actions: 'Actions',
+  ioc: 'IOC Lookup',
+  settings: 'Settings',
+};
 
-  if (modalState !== 'command') return null;
+const CATEGORY_ORDER = ['navigation', 'session', 'actions', 'ioc', 'settings'];
 
-  const close = () => setModalState('none');
+export function CommandPalette({ open, onOpenChange, commands }: CommandPaletteProps) {
+  const grouped = useMemo(() => {
+    const groups: Record<string, CommandItem[]> = {};
+    for (const cmd of commands) {
+      if (!groups[cmd.category]) groups[cmd.category] = [];
+      groups[cmd.category].push(cmd);
+    }
+    return groups;
+  }, [commands]);
 
-  const navigateTo = (tab: BottomTab) => {
-    setBottomPrimaryTab(tab);
-    close();
-  };
-
-  const switchLayout = (preset: LayoutPreset) => {
-    setPreset(preset);
-    close();
-  };
-
-  const openModal = (state: 'caseName' | 'export' | 'settings') => {
-    setModalState(state);
-  };
+  if (!open) return null;
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center pt-[20vh]"
-      style={{
-        background: 'rgba(0, 0, 0, 0.6)',
-        backdropFilter: 'blur(8px)',
-        WebkitBackdropFilter: 'blur(8px)',
-      }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) close();
-      }}
+      className="fixed inset-0 z-[200] flex items-start justify-center pt-[20vh]"
+      onClick={() => onOpenChange(false)}
     >
+      {/* Backdrop */}
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+
+      {/* Palette */}
       <div
-        className="w-full max-w-lg rounded border overflow-hidden animate-slide-down"
-        style={{
-          background: 'var(--st-glass-bg-heavy)',
-          backdropFilter: 'blur(var(--st-glass-blur-heavy))',
-          WebkitBackdropFilter: 'blur(var(--st-glass-blur-heavy))',
-          borderColor: 'var(--st-glass-border-accent)',
-          boxShadow: 'var(--st-glass-shadow), 0 0 40px var(--st-accent-glow)',
-        }}
+        className="relative glass rounded-xl border border-[color:var(--st-glass-border)] w-[560px] max-w-[90vw] shadow-2xl animate-fade-in overflow-hidden"
+        onClick={e => e.stopPropagation()}
       >
         <Command
-          className="flex flex-col"
           label="Command Palette"
+          className="flex flex-col"
         >
-          <Command.Input
-            placeholder="Type a command..."
-            className="w-full h-11 px-4 text-[12px] font-mono bg-transparent outline-none border-b placeholder:opacity-40"
-            style={{
-              color: 'var(--st-text-primary)',
-              borderColor: 'var(--st-border)',
-            }}
-          />
+          {/* Search input */}
+          <div className="flex items-center gap-3 px-4 py-3 border-b border-white/8">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-[color:var(--st-text-muted)] shrink-0">
+              <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
+            <Command.Input
+              placeholder="Type a command or search..."
+              aria-label="Search commands"
+              className="flex-1 bg-transparent text-sm text-[color:var(--st-text-primary)] placeholder:text-[color:var(--st-text-muted)] outline-none"
+              autoFocus
+            />
+            <kbd className="text-[10px] text-[color:var(--st-text-muted)] bg-white/5 rounded px-1.5 py-0.5 border border-white/10 font-mono">
+              ESC
+            </kbd>
+          </div>
 
-          <Command.List
-            className="max-h-[320px] overflow-y-auto p-1.5"
-          >
-            <Command.Empty
-              className="py-6 text-center text-[11px]"
-              style={{ color: 'var(--st-text-muted)' }}
-            >
-              No results found.
+          {/* Command list */}
+          <Command.List className="max-h-[320px] overflow-y-auto p-2">
+            <Command.Empty className="py-6 text-center text-sm text-[color:var(--st-text-muted)]">
+              No commands found.
             </Command.Empty>
 
-            <Command.Group
-              heading="Navigation"
-              className="[&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-bold [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5"
-              style={{ '--heading-color': 'var(--st-text-muted)' } as React.CSSProperties}
-            >
-              {NAV_ITEMS.map(({ label, tab, shortcut }) => (
-                <Command.Item
-                  key={tab}
-                  value={label}
-                  onSelect={() => navigateTo(tab)}
-                  className="flex items-center gap-2 h-8 px-2 rounded-sm text-[11px] cursor-pointer transition-colors data-[selected=true]:bg-[var(--st-bg-hover)]"
-                  style={{ color: 'var(--st-text-label)' }}
+            {CATEGORY_ORDER.map(cat => {
+              const items = grouped[cat];
+              if (!items || items.length === 0) return null;
+              return (
+                <Command.Group
+                  key={cat}
+                  heading={CATEGORY_LABELS[cat] || cat}
+                  className="mb-2"
                 >
-                  <span className="data-[selected=true]:text-[var(--st-accent)]">{label}</span>
-                  <ShortcutBadge keys={`Cmd+${shortcut}`} />
-                </Command.Item>
-              ))}
-            </Command.Group>
-
-            <Command.Separator className="h-px my-1" style={{ background: 'var(--st-border)' }} />
-
-            <Command.Group
-              heading="Layouts"
-              className="[&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-bold [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5"
-            >
-              {LAYOUT_ITEMS.map(({ label, preset }) => (
-                <Command.Item
-                  key={preset}
-                  value={label}
-                  onSelect={() => switchLayout(preset)}
-                  className="flex items-center gap-2 h-8 px-2 rounded-sm text-[11px] cursor-pointer transition-colors data-[selected=true]:bg-[var(--st-bg-hover)]"
-                  style={{ color: 'var(--st-text-label)' }}
-                >
-                  {label}
-                </Command.Item>
-              ))}
-            </Command.Group>
-
-            <Command.Separator className="h-px my-1" style={{ background: 'var(--st-border)' }} />
-
-            <Command.Group
-              heading="Session"
-              className="[&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-bold [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5"
-            >
-              <Command.Item
-                value="New Case"
-                onSelect={() => openModal('caseName')}
-                className="flex items-center gap-2 h-8 px-2 rounded-sm text-[11px] cursor-pointer transition-colors data-[selected=true]:bg-[var(--st-bg-hover)]"
-                style={{ color: 'var(--st-text-label)' }}
-              >
-                New Case
-                <ShortcutBadge keys="Cmd+N" />
-              </Command.Item>
-              <Command.Item
-                value="Export Report"
-                onSelect={() => openModal('export')}
-                className="flex items-center gap-2 h-8 px-2 rounded-sm text-[11px] cursor-pointer transition-colors data-[selected=true]:bg-[var(--st-bg-hover)]"
-                style={{ color: 'var(--st-text-label)' }}
-              >
-                Export Report
-                <ShortcutBadge keys="Cmd+E" />
-              </Command.Item>
-            </Command.Group>
-
-            <Command.Separator className="h-px my-1" style={{ background: 'var(--st-border)' }} />
-
-            <Command.Group
-              heading="Settings"
-              className="[&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:font-bold [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5"
-            >
-              <Command.Item
-                value="Settings"
-                onSelect={() => openModal('settings')}
-                className="flex items-center gap-2 h-8 px-2 rounded-sm text-[11px] cursor-pointer transition-colors data-[selected=true]:bg-[var(--st-bg-hover)]"
-                style={{ color: 'var(--st-text-label)' }}
-              >
-                Settings
-                <ShortcutBadge keys="Cmd+," />
-              </Command.Item>
-            </Command.Group>
+                  <div className="text-[10px] font-medium text-[color:var(--st-text-muted)] uppercase tracking-wider px-2 py-1.5">
+                    {CATEGORY_LABELS[cat] || cat}
+                  </div>
+                  {items.map(cmd => (
+                    <Command.Item
+                      key={cmd.id}
+                      value={`${cmd.label} ${cmd.description || ''}`}
+                      onSelect={cmd.onSelect}
+                      className="flex items-center justify-between gap-2 px-2 py-1.5 text-sm rounded-md cursor-pointer text-[color:var(--st-text-secondary)] data-[selected=true]:bg-[color:var(--st-accent-dim)] data-[selected=true]:text-[color:var(--st-text-primary)] transition-colors"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <span className="text-[color:var(--st-text-primary)]">{cmd.label}</span>
+                        {cmd.description && (
+                          <span className="text-[color:var(--st-text-muted)] text-xs ml-2">{cmd.description}</span>
+                        )}
+                      </div>
+                      {cmd.shortcut && (
+                        <kbd className="text-[10px] text-[color:var(--st-text-muted)] bg-white/5 rounded px-1.5 py-0.5 border border-white/10 font-mono shrink-0">
+                          {cmd.shortcut}
+                        </kbd>
+                      )}
+                    </Command.Item>
+                  ))}
+                </Command.Group>
+              );
+            })}
           </Command.List>
 
-          <div
-            className="flex items-center gap-4 h-8 px-3 border-t text-[10px]"
-            style={{
-              borderColor: 'var(--st-border)',
-              color: 'var(--st-text-muted)',
-            }}
-          >
-            <span>&#8593;&#8595; navigate</span>
-            <span>&#8629; select</span>
-            <span>&#8984;K toggle</span>
+          {/* Footer hint */}
+          <div className="flex items-center justify-between px-4 py-2 border-t border-white/8 text-[10px] text-[color:var(--st-text-muted)]">
+            <div className="flex items-center gap-3">
+              <span className="flex items-center gap-1">
+                <kbd className="bg-white/5 rounded px-1 py-0.5 border border-white/10 font-mono">↑↓</kbd>
+                navigate
+              </span>
+              <span className="flex items-center gap-1">
+                <kbd className="bg-white/5 rounded px-1 py-0.5 border border-white/10 font-mono">↵</kbd>
+                select
+              </span>
+            </div>
+            <span className="flex items-center gap-1">
+              <kbd className="bg-white/5 rounded px-1 py-0.5 border border-white/10 font-mono">⌘K</kbd>
+              <span className="hidden" aria-hidden="true">/</span>
+              <kbd className="bg-white/5 rounded px-1 py-0.5 border border-white/10 font-mono">Ctrl+K</kbd>
+              toggle
+            </span>
           </div>
         </Command>
       </div>

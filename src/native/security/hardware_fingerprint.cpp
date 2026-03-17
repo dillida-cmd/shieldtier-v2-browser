@@ -15,7 +15,11 @@
 #include <net/if_dl.h>
 #include <sys/sysctl.h>
 #include <sys/types.h>
-#elif defined(__linux__)
+#else
+#include <openssl/evp.h>
+#endif
+
+#if defined(__linux__)
 #include <fstream>
 #include <ifaddrs.h>
 #include <net/if.h>
@@ -42,23 +46,21 @@ std::string sha256_hex(const std::string& input) {
     }
     return ss.str();
 #else
-    // Minimal SHA-256 for non-Apple platforms
-    // Use a simple hash as placeholder; in production link OpenSSL or similar
-    uint64_t h = 0xcbf29ce484222325ULL;
-    for (char c : input) {
-        h ^= static_cast<uint64_t>(static_cast<uint8_t>(c));
-        h *= 0x100000001b3ULL;
+    unsigned char digest[EVP_MAX_MD_SIZE];
+    unsigned int digest_len = 0;
+    EVP_MD_CTX* ctx = EVP_MD_CTX_new();
+    if (ctx) {
+        EVP_DigestInit_ex(ctx, EVP_sha256(), nullptr);
+        EVP_DigestUpdate(ctx, input.data(), input.size());
+        EVP_DigestFinal_ex(ctx, digest, &digest_len);
+        EVP_MD_CTX_free(ctx);
     }
-    uint64_t h2 = 0x517cc1b727220a95ULL;
-    for (char c : input) {
-        h2 ^= static_cast<uint64_t>(static_cast<uint8_t>(c));
-        h2 *= 0x100000001b3ULL;
-    }
+
     std::ostringstream ss;
     ss << std::hex << std::setfill('0');
-    ss << std::setw(16) << h << std::setw(16) << h2;
-    // Pad to 64 hex chars
-    ss << std::setw(16) << (h ^ h2) << std::setw(16) << (h + h2);
+    for (unsigned int i = 0; i < digest_len; ++i) {
+        ss << std::setw(2) << static_cast<unsigned>(digest[i]);
+    }
     return ss.str();
 #endif
 }

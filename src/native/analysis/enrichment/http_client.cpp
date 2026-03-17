@@ -210,6 +210,18 @@ Result<HttpResponse> HttpClient::post_form(
     return impl_->perform(url, headers, &form_data, true);
 }
 
+Result<HttpResponse> HttpClient::post_raw(
+    const std::string& url, const std::string& body,
+    const std::unordered_map<std::string, std::string>& headers) {
+    return impl_->perform(url, headers, &body);
+}
+
+Result<HttpResponse> HttpClient::get_raw(
+    const std::string& url,
+    const std::unordered_map<std::string, std::string>& headers) {
+    return impl_->perform(url, headers);
+}
+
 void HttpClient::set_timeout(long timeout_seconds) {
     impl_->timeout_seconds = timeout_seconds;
 }

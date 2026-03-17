@@ -9,6 +9,7 @@
 #include "include/cef_browser.h"
 #include "include/cef_client.h"
 #include "include/cef_request_context.h"
+#include "include/cef_scheme.h"
 
 #include "common/types.h"
 
@@ -25,6 +26,12 @@ public:
         CefRefPtr<CefRequestContext> context;
         bool in_memory = false;
     };
+
+    void set_parent_view(void* view, int width, int height);
+
+    void set_scheme_handler(const std::string& scheme,
+                            const std::string& domain,
+                            CefRefPtr<CefSchemeHandlerFactory> factory);
 
     void create_tab(const std::string& url, bool in_memory,
                     CefRefPtr<CefClient> client);
@@ -45,6 +52,9 @@ public:
 
 private:
     std::string root_cache_path_;
+    void* parent_view_ = nullptr;
+    int parent_width_ = 0;
+    int parent_height_ = 0;
     int next_tab_id_ = 1;
     std::unordered_map<int, TabInfo> tabs_;
     std::unordered_map<int, int> cef_id_to_tab_id_;
@@ -52,6 +62,10 @@ private:
     // Pending tabs waiting for CEF to assign a browser ID.
     // Keyed by our internal tab_id since we don't have the CEF ID yet.
     std::unordered_map<int, TabInfo> pending_tabs_;
+
+    std::string scheme_name_;
+    std::string scheme_domain_;
+    CefRefPtr<CefSchemeHandlerFactory> scheme_factory_;
 
     std::unordered_map<std::string, FileBuffer> captured_files_;
     std::mutex captured_mutex_;

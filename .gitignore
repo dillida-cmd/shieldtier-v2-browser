@@ -1,14 +1,8 @@
 # OS
 .DS_Store
 
-# Local docs & skills (never push)
-*.md
-docs/
-skills/
-
 # Build
 build/
-dist/
 cmake-build-*/
 compile_commands.json
 *.o
@@ -16,7 +10,6 @@ compile_commands.json
 *.so
 *.dylib
 *.dll
-*.exe
 *.dSYM/
 
 # IDE
@@ -35,3 +28,18 @@ third_party/
 *.pfx
 .env
 .env.*
+
+# Sandbox runtime (images, overlays, results)
+sandbox/images/*.iso
+sandbox/images/*.qcow2
+sandbox/snapshots/
+sandbox/dynamic-*/
+sandbox/results/
+
+# Cache
+.cache/
+src/renderer/.vite/
+
+# Test binaries (compiled during UAT)
+sandbox/samples/*.exe
+sandbox/samples/*.elf

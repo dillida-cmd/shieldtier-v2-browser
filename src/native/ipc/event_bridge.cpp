@@ -42,7 +42,7 @@ void EventBridge::push(const std::string& event, const json& data) {
     }
     if (!browser) return;
 
-    std::string payload = data.dump();
+    std::string payload = data.dump(-1, ' ', false, json::error_handler_t::replace);
     // Escape U+2028/U+2029 — valid in JSON but line terminators in JavaScript
     for (size_t pos = 0; pos < payload.size(); ++pos) {
         if (payload[pos] == '\xe2' && pos + 2 < payload.size() &&
@@ -118,6 +118,34 @@ void EventBridge::push_navigation_state(bool can_back, bool can_forward,
         {"url", url},
         {"title", title},
     });
+}
+
+void EventBridge::push_load_error(int code, const std::string& text,
+                                   const std::string& url) {
+    push("load_error", {{"code", code}, {"text", text}, {"url", url}});
+}
+
+void EventBridge::push_screenshot(const std::string& url) {
+    push("screenshot", {{"url", url}});
+}
+
+void EventBridge::push_dom_snapshot(const json& snapshot) {
+    push("dom_snapshot", snapshot);
+}
+
+void EventBridge::push_email_parsed(const json& email) {
+    push("email_parsed", email);
+}
+
+void EventBridge::push_log_progress(const std::string& id,
+                                     const std::string& file_name,
+                                     const std::string& status) {
+    push("log_progress", {{"id", id}, {"fileName", file_name}, {"status", status}});
+}
+
+void EventBridge::push_log_complete(const std::string& id,
+                                     const json& result) {
+    push("log_complete", {{"id", id}, {"result", result}});
 }
 
 }  // namespace shieldtier

@@ -13,6 +13,8 @@ public:
         return this;
     }
 
+    void OnRegisterCustomSchemes(
+        CefRawPtr<CefSchemeRegistrar> registrar) override;
     void OnWebKitInitialized() override;
     void OnContextCreated(CefRefPtr<CefBrowser> browser,
                           CefRefPtr<CefFrame> frame,

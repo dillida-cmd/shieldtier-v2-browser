@@ -6,10 +6,28 @@
 #include "include/cef_cookie.h"
 #include "include/cef_request_context_handler.h"
 
+#if defined(OS_MAC)
+#include "app/app_mac.h"
+#endif
+
 namespace shieldtier {
 
 SessionManager::SessionManager(const std::string& root_cache_path)
     : root_cache_path_(root_cache_path) {}
+
+void SessionManager::set_parent_view(void* view, int width, int height) {
+    parent_view_ = view;
+    parent_width_ = width;
+    parent_height_ = height;
+}
+
+void SessionManager::set_scheme_handler(const std::string& scheme,
+                                        const std::string& domain,
+                                        CefRefPtr<CefSchemeHandlerFactory> factory) {
+    scheme_name_ = scheme;
+    scheme_domain_ = domain;
+    scheme_factory_ = factory;
+}
 
 void SessionManager::create_tab(const std::string& url, bool in_memory,
                                 CefRefPtr<CefClient> client) {
@@ -24,8 +42,21 @@ void SessionManager::create_tab(const std::string& url, bool in_memory,
     CefRefPtr<CefRequestContext> context =
         CefRequestContext::CreateContext(ctx_settings, nullptr);
 
+    if (scheme_factory_) {
+        context->RegisterSchemeHandlerFactory(scheme_name_, scheme_domain_,
+                                              scheme_factory_);
+    }
+
     CefWindowInfo window_info;
-#if defined(_WIN32)
+    window_info.runtime_style = CEF_RUNTIME_STYLE_ALLOY;
+#if defined(OS_MAC)
+    fprintf(stderr, "[ShieldTier] parent_view=%p, size=%dx%d\n",
+            parent_view_, parent_width_, parent_height_);
+    if (parent_view_) {
+        window_info.SetAsChild(parent_view_,
+                               CefRect(0, 0, parent_width_, parent_height_));
+    }
+#elif defined(OS_WIN)
     window_info.SetAsPopup(nullptr, "ShieldTier");
 #endif
 
@@ -38,9 +69,13 @@ void SessionManager::create_tab(const std::string& url, bool in_memory,
 
     pending_tabs_[tab_id] = info;
 
-    if (!CefBrowserHost::CreateBrowser(window_info, client, url,
-                                       browser_settings, nullptr, context)) {
+    bool result = CefBrowserHost::CreateBrowser(window_info, client, url,
+                                                browser_settings, nullptr, context);
+    if (!result) {
+        fprintf(stderr, "[ShieldTier] CreateBrowser FAILED for url: %s\n", url.c_str());
         pending_tabs_.erase(tab_id);
+    } else {
+        fprintf(stderr, "[ShieldTier] CreateBrowser OK for url: %s\n", url.c_str());
     }
 }
 
@@ -133,6 +168,15 @@ void SessionManager::on_browser_created(CefRefPtr<CefBrowser> browser) {
             TabInfo info = it->second;
             info.browser_id = cef_id;
             info.browser = browser;
+
+#if defined(OS_MAC)
+            // Only the UI browser (our managed tabs) gets autoresizing to fill the window.
+            // The content browser is positioned manually via set_content_bounds.
+            void* view = browser->GetHost()->GetWindowHandle();
+            if (view) {
+                shieldtier_mac_set_view_autoresizing(view);
+            }
+#endif
 
             tabs_[info.tab_id] = info;
             cef_id_to_tab_id_[cef_id] = info.tab_id;

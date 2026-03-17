@@ -40,6 +40,16 @@ public:
         const std::string& url, const std::string& form_data,
         const std::unordered_map<std::string, std::string>& headers = {});
 
+    /** Raw POST — returns full HttpResponse regardless of status code. */
+    Result<HttpResponse> post_raw(
+        const std::string& url, const std::string& body,
+        const std::unordered_map<std::string, std::string>& headers = {});
+
+    /** Raw GET — returns full HttpResponse regardless of status code. */
+    Result<HttpResponse> get_raw(
+        const std::string& url,
+        const std::unordered_map<std::string, std::string>& headers = {});
+
     void set_timeout(long timeout_seconds);
     void set_user_agent(const std::string& user_agent);
 

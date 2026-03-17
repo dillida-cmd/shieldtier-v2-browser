@@ -120,8 +120,8 @@ static bool is_binary_mime(const std::string& mime) {
 static bool has_suspicious_extension(const std::string& url) {
     static const char* const kExtensions[] = {
         ".exe", ".dll", ".scr", ".msi", ".zip", ".rar", ".7z",
-        ".bat", ".cmd", ".ps1", ".vbs", ".js",  ".hta", ".iso",
-        ".img", ".cab", ".lnk",
+        ".bat", ".cmd", ".ps1", ".vbs", ".hta", ".iso",
+        ".img", ".cab", ".lnk", ".wsf", ".jar", ".apk",
     };
 
     std::string path = url;
@@ -230,6 +230,9 @@ CefResponseFilter::FilterStatus DownloadCaptureFilter::Filter(
             overflow_ = true;
             buffer_.clear();
             buffer_.shrink_to_fit();
+            fprintf(stderr, "[ShieldTier] Download capture overflow for %s "
+                    "— file exceeds %zuMB, switching to hash-only mode\n",
+                    url_.c_str(), kMaxCaptureSize / (1024 * 1024));
         } else {
             auto* bytes = static_cast<const uint8_t*>(data_in);
             buffer_.insert(buffer_.end(), bytes, bytes + to_copy);

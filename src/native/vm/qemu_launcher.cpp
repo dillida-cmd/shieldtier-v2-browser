@@ -171,8 +171,18 @@ std::vector<std::string> QemuLauncher::build_args(const VmInstance& vm) const {
     args.push_back("-machine");
     args.push_back("q35");
 
+    // On Apple Silicon running x86_64 guests, use TCG (software emulation)
+    // since HVF only supports same-arch virtualization
     args.push_back("-cpu");
+#if defined(__aarch64__) || defined(__arm64__)
+    if (vm.config.platform != VmPlatform::kMacOS) {
+        args.push_back("qemu64");  // TCG-compatible CPU model for x86 on ARM
+    } else {
+        args.push_back("host");
+    }
+#else
     args.push_back("host");
+#endif
 
     args.push_back("-m");
     args.push_back(std::to_string(vm.config.memory_mb));
@@ -195,8 +205,9 @@ std::vector<std::string> QemuLauncher::build_args(const VmInstance& vm) const {
                    ",server,nowait");
 
     if (vm.config.enable_network) {
+        // restrict=on prevents VM from reaching host or internet — sandbox isolation
         args.push_back("-nic");
-        args.push_back("user,model=e1000");
+        args.push_back("user,model=e1000,restrict=on");
     } else {
         args.push_back("-nic");
         args.push_back("none");
@@ -207,8 +218,17 @@ std::vector<std::string> QemuLauncher::build_args(const VmInstance& vm) const {
         args.push_back(vm.config.snapshot_name);
     }
 
-    // Hardware acceleration
-#ifdef __APPLE__
+    // Hardware acceleration — use HVF/KVM for same-arch, TCG for cross-arch
+#if defined(__APPLE__) && (defined(__aarch64__) || defined(__arm64__))
+    // Apple Silicon: HVF only works for aarch64 guests, use TCG for x86
+    if (vm.config.platform == VmPlatform::kMacOS) {
+        args.push_back("-accel");
+        args.push_back("hvf");
+    } else {
+        args.push_back("-accel");
+        args.push_back("tcg");
+    }
+#elif defined(__APPLE__)
     args.push_back("-accel");
     args.push_back("hvf");
 #elif defined(__linux__)

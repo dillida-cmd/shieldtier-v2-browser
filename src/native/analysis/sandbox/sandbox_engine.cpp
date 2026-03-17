@@ -6,6 +6,7 @@
 #include <cmath>
 
 #include "analysis/fileanalysis/file_analyzer.h"
+#include "analysis/fileanalysis/pe_analyzer.h"
 #include "analysis/sandbox/behavior_signatures.h"
 #include "analysis/sandbox/network_profiler.h"
 
@@ -41,9 +42,12 @@ Result<AnalysisEngineResult> SandboxEngine::analyze(const FileBuffer& file) {
 
     auto strings = FileAnalyzer::extract_strings(file.ptr(), file.size(), 4, 5000);
 
+    // Extract actual PE import names when possible, fall back to strings
+    auto api_names = extract_api_names(file, strings);
+
     std::vector<BehaviorEvent> events;
 
-    auto import_events = analyze_import_behavior(strings);
+    auto import_events = analyze_import_behavior(api_names);
     events.insert(events.end(), import_events.begin(), import_events.end());
 
     auto string_events = analyze_string_behavior(strings);
@@ -94,7 +98,9 @@ std::vector<BehaviorEvent> SandboxEngine::analyze_import_behavior(
         for (const auto& api : pattern.required_apis) {
             bool found = false;
             for (const auto& s : strings) {
-                if (s == api) {
+                // Match exact, or with A/W suffix (Win32 ANSI/Unicode variants)
+                if (s == api || s == api + "A" || s == api + "W" ||
+                    s == api + "Ex" || s == api + "ExA" || s == api + "ExW") {
                     found = true;
                     break;
                 }
@@ -275,6 +281,29 @@ std::vector<Finding> SandboxEngine::events_to_findings(
     }
 
     return findings;
+}
+
+std::vector<std::string> SandboxEngine::extract_api_names(
+    const FileBuffer& file, const std::vector<std::string>& strings) {
+
+    // Try PE import table first — this gives actual imported API names
+    if (file.size() >= 64 && file.ptr()[0] == 'M' && file.ptr()[1] == 'Z') {
+        PeAnalyzer pe;
+        auto pe_result = pe.analyze(file);
+        if (pe_result.ok()) {
+            std::vector<std::string> api_names;
+            api_names.reserve(pe_result.value().imports.size() + strings.size());
+            for (const auto& imp : pe_result.value().imports) {
+                api_names.push_back(imp.function_name);
+            }
+            // Also include extracted strings — catches delayed/dynamic imports
+            api_names.insert(api_names.end(), strings.begin(), strings.end());
+            return api_names;
+        }
+    }
+
+    // Non-PE or parse failed — fall back to string extraction only
+    return strings;
 }
 
 }  // namespace shieldtier

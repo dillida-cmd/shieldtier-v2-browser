@@ -1,11 +1,15 @@
 #include "app/shieldtier_app.h"
 #include "app/shieldtier_renderer_app.h"
+#include "config/paths.h"
 
 #include "include/cef_app.h"
 #include "include/cef_command_line.h"
 
 #if defined(OS_MAC)
+#include "app/app_mac.h"
 #include "include/wrapper/cef_library_loader.h"
+#include <mach-o/dyld.h>
+#include <filesystem>
 #endif
 
 #if defined(OS_WIN)
@@ -38,31 +42,37 @@ int main(int argc, char* argv[]) {
         return exit_code;
     }
 
+#if defined(OS_MAC)
+    shieldtier_mac_init();
+#endif
+
     CefSettings settings;
     settings.no_sandbox = true;
     settings.multi_threaded_message_loop = false;
-    CefString(&settings.root_cache_path) = "/tmp/shieldtier/cache";
+    CefString(&settings.root_cache_path) = shieldtier::paths::get_cache_path();
+    CefString(&settings.locale) = "en-US";
+    settings.log_severity = LOGSEVERITY_WARNING;
 
 #if defined(OS_MAC)
-    // CEF framework path relative to the app bundle.
-    // Resolves to: ShieldTier.app/Contents/Frameworks/Chromium Embedded Framework.framework
-    CefString(&settings.framework_dir_path) =
-        "../Frameworks/Chromium Embedded Framework.framework";
+    {
+        char exe_buf[4096];
+        uint32_t exe_size = sizeof(exe_buf);
+        if (_NSGetExecutablePath(exe_buf, &exe_size) == 0) {
+            namespace fs = std::filesystem;
+            auto exe_dir = fs::canonical(fs::path(exe_buf).parent_path());
+            auto frameworks = exe_dir / ".." / "Frameworks";
+            auto fw_path = fs::canonical(frameworks / "Chromium Embedded Framework.framework");
+            CefString(&settings.framework_dir_path) = fw_path.string();
+            // Don't set browser_subprocess_path — CEF auto-discovers variant
+            // helpers (Renderer, GPU, etc.) from the Frameworks directory.
+        }
+    }
 #endif
 
     CefRefPtr<ShieldTierApp> app(new ShieldTierApp());
 
     if (!CefInitialize(main_args, settings, app.get(), nullptr)) {
         return 1;
-    }
-
-    // Append WebRTC privacy switches after CEF is initialized
-    CefRefPtr<CefCommandLine> command_line =
-        CefCommandLine::GetGlobalCommandLine();
-    if (command_line) {
-        command_line->AppendSwitchWithValue(
-            "force-webrtc-ip-handling-policy", "disable_non_proxied_udp");
-        command_line->AppendSwitch("disable-webrtc-hide-local-ips-with-mdns");
     }
     CefRunMessageLoop();
     CefShutdown();

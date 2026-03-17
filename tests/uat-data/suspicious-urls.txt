@@ -1,0 +1,10 @@
+http://paypa1-secure-login.com/verify?id=a8f3b2c1
+http://malware-c2.evil.com/payload.sh
+http://exfil.evil.com/upload
+https://bit.ly/3xM4lw4r3
+http://192.168.1.50:8080/reverse-shell.ps1
+http://update-flash-player.com/FlashPlayer.exe
+https://docs.google.com.evil-domain.ru/document/d/phishing
+http://free-antivirus-scan.com/scan.exe
+ftp://anonymous@185.234.72.19/pub/tools/mimikatz.exe
+http://pastebin.com/raw/SuSp1c10us

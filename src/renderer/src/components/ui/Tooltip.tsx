@@ -2,11 +2,25 @@ import * as React from 'react';
 import * as TooltipPrimitive from '@radix-ui/react-tooltip';
 import { cn } from '../../lib/utils';
 
-export const TooltipProvider = TooltipPrimitive.Provider;
-export const Tooltip = TooltipPrimitive.Root;
-export const TooltipTrigger = TooltipPrimitive.Trigger;
+const TooltipProvider = ({
+  delayDuration = 300,
+  skipDelayDuration = 0,
+  disableHoverableContent = true,
+  ...props
+}: TooltipPrimitive.TooltipProviderProps) => (
+  <TooltipPrimitive.Provider
+    delayDuration={delayDuration}
+    skipDelayDuration={skipDelayDuration}
+    disableHoverableContent={disableHoverableContent}
+    {...props}
+  />
+);
+TooltipProvider.displayName = 'TooltipProvider';
 
-export const TooltipContent = React.forwardRef<
+const Tooltip = TooltipPrimitive.Root;
+const TooltipTrigger = TooltipPrimitive.Trigger;
+
+const TooltipContent = React.forwardRef<
   React.ComponentRef<typeof TooltipPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof TooltipPrimitive.Content>
 >(({ className, sideOffset = 4, ...props }, ref) => (
@@ -15,11 +29,13 @@ export const TooltipContent = React.forwardRef<
       ref={ref}
       sideOffset={sideOffset}
       className={cn(
-        'glass-heavy z-50 rounded border border-[var(--st-glass-border-accent)] px-2 py-1 text-[10px] font-mono text-[var(--st-text-primary)] animate-fade-in',
+        'glass-light z-50 overflow-hidden rounded-md border border-[color:var(--st-glass-border)] px-2.5 py-1.5 text-xs text-[color:var(--st-text-primary)] shadow-lg animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2',
         className,
       )}
       {...props}
     />
   </TooltipPrimitive.Portal>
 ));
-TooltipContent.displayName = 'TooltipContent';
+TooltipContent.displayName = TooltipPrimitive.Content.displayName;
+
+export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider };

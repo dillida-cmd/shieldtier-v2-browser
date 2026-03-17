@@ -1,0 +1,8 @@
+CEF:0|SecurityVendor|SecurityProduct|1.0|100|Malware Detected|10|src=192.168.1.50 dst=10.0.0.1 spt=12345 dpt=443 act=blocked msg=Trojan.GenericKD.46789012 detected in download
+CEF:0|SecurityVendor|SecurityProduct|1.0|200|Intrusion Attempt|8|src=185.234.72.19 dst=10.0.0.1 spt=54321 dpt=22 act=blocked msg=SSH brute force attempt detected - 50 failed logins in 60 seconds
+CEF:0|SecurityVendor|SecurityProduct|1.0|300|Data Exfiltration|9|src=10.0.0.50 dst=203.0.113.99 spt=8080 dpt=443 act=alert msg=Large outbound data transfer 250MB to unknown external host
+CEF:0|SecurityVendor|SecurityProduct|1.0|400|C2 Communication|10|src=10.0.0.50 dst=198.51.100.77 spt=49152 dpt=8443 act=blocked msg=Known C2 beacon pattern detected - interval 60s jitter 10%
+CEF:0|SecurityVendor|SecurityProduct|1.0|500|Privilege Escalation|7|src=10.0.0.50 suser=www-data duser=root act=alert msg=Process www-data attempted to execute /usr/bin/sudo without authorization
+CEF:0|SecurityVendor|SecurityProduct|1.0|600|Lateral Movement|8|src=10.0.0.50 dst=10.0.0.100 spt=44567 dpt=445 act=alert msg=SMB connection from compromised host to internal file server
+CEF:0|SecurityVendor|SecurityProduct|1.0|700|Phishing|6|src=external dst=user@company.com act=quarantine msg=Email from paypa1-verify.com flagged as phishing - SPF fail DKIM none
+CEF:0|SecurityVendor|SecurityProduct|1.0|800|DNS Tunneling|9|src=10.0.0.50 dst=8.8.8.8 spt=53 dpt=53 act=alert msg=Abnormal DNS query pattern - base64 encoded subdomain labels detected
