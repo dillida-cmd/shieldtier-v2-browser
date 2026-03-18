@@ -375,6 +375,12 @@ bool MessageHandler::OnQuery(CefRefPtr<CefBrowser> browser,
             result = handle_get_url_chains(req.payload);
         } else if (req.action == ipc::kActionGetFilePreview) {
             result = handle_get_file_preview(req.payload);
+        } else if (req.action == ipc::kActionGetAppInfo) {
+            result = handle_get_app_info(req.payload);
+        } else if (req.action == ipc::kActionCheckUpdate) {
+            result = handle_check_update(req.payload);
+        } else if (req.action == ipc::kActionSubmitFeedback) {
+            result = handle_submit_feedback(req.payload);
         } else {
             callback->Failure(404, ipc::make_error("unknown_action").dump());
             return true;
@@ -4678,6 +4684,153 @@ json MessageHandler::handle_get_file_preview(const json& payload) {
         {"dataUrl", data_url},
         {"textContent", text_content},
     });
+}
+
+// ═══════════════════════════════════════════════════════
+// App Info / Update / Feedback Handlers
+// ═══════════════════════════════════════════════════════
+
+json MessageHandler::handle_get_app_info(const json& /*payload*/) {
+    return ipc::make_success({
+        {"version", "2.0.0"},
+        {"buildDate", __DATE__},
+        {"platform",
+#if defined(OS_MAC) || defined(OS_MACOS)
+            "macOS"
+#elif defined(OS_WINDOWS) || defined(_WIN32)
+            "Windows"
+#elif defined(OS_LINUX)
+            "Linux"
+#else
+            "Unknown"
+#endif
+        },
+        {"arch",
+#if defined(__aarch64__) || defined(_M_ARM64)
+            "arm64"
+#else
+            "x64"
+#endif
+        },
+        {"engine", "CEF (Chromium Embedded Framework)"},
+        {"copyright", "ShieldTier. All rights reserved."},
+        {"website", "https://socbrowser.com"},
+        {"support", "support@socbrowser.com"},
+        {"github", "https://github.com/dillida/shieldtier-v2-browser"},
+    });
+}
+
+json MessageHandler::handle_check_update(const json& /*payload*/) {
+    // Check for updates from the API server
+    // GET https://api.socbrowser.com/v1/update/check?version=2.0.0&platform=<platform>&arch=<arch>
+    std::string platform =
+#if defined(OS_MAC) || defined(OS_MACOS)
+        "macos";
+#elif defined(OS_WINDOWS) || defined(_WIN32)
+        "windows";
+#elif defined(OS_LINUX)
+        "linux";
+#else
+        "unknown";
+#endif
+
+    std::string arch =
+#if defined(__aarch64__) || defined(_M_ARM64)
+        "arm64";
+#else
+        "x64";
+#endif
+
+    std::string url = std::string(kAuthApiUrl) +
+        "/v1/update/check?version=2.0.0&platform=" + platform + "&arch=" + arch;
+
+    try {
+        auto result = auth_http_->get_raw(url);
+        if (result.ok()) {
+            auto& resp = result.value();
+            if (resp.status_code == 200 && !resp.body.empty()) {
+                auto data = json::parse(resp.body);
+                bool update_available = data.value("updateAvailable", false);
+                return ipc::make_success({
+                    {"status", update_available ? "available" : "not-available"},
+                    {"currentVersion", "2.0.0"},
+                    {"availableVersion", data.value("latestVersion", "")},
+                    {"downloadUrl", data.value("downloadUrl", "")},
+                    {"releaseNotes", data.value("releaseNotes", "")},
+                    {"downloadProgress", 0},
+                    {"error", nullptr},
+                });
+            }
+        }
+    } catch (...) {}
+
+    // Offline or server unreachable — return current state
+    return ipc::make_success({
+        {"status", "not-available"},
+        {"currentVersion", "2.0.0"},
+        {"availableVersion", nullptr},
+        {"downloadProgress", 0},
+        {"error", nullptr},
+    });
+}
+
+json MessageHandler::handle_submit_feedback(const json& payload) {
+    std::string type = payload.value("type", "general");       // bug, feature, general
+    std::string message = payload.value("message", "");
+    std::string email = payload.value("email", "");
+    int rating = payload.value("rating", 0);                   // 1-5 stars
+
+    if (message.empty()) {
+        return ipc::make_error("Feedback message cannot be empty");
+    }
+
+    // POST https://api.socbrowser.com/v1/feedback
+    std::string platform =
+#if defined(OS_MAC) || defined(OS_MACOS)
+        "macos";
+#elif defined(OS_WINDOWS) || defined(_WIN32)
+        "windows";
+#elif defined(OS_LINUX)
+        "linux";
+#else
+        "unknown";
+#endif
+
+    json body = {
+        {"type", type},
+        {"message", message},
+        {"email", email},
+        {"rating", rating},
+        {"version", "2.0.0"},
+        {"platform", platform},
+    };
+
+    // Include user info if logged in
+    {
+        std::lock_guard<std::mutex> lock(auth_mutex_);
+        if (!auth_user_.is_null() && auth_user_.contains("email")) {
+            body["userEmail"] = auth_user_["email"];
+        }
+        if (!auth_user_.is_null() && auth_user_.contains("name")) {
+            body["userName"] = auth_user_["name"];
+        }
+    }
+
+    std::string url = std::string(kAuthApiUrl) + "/v1/feedback";
+    try {
+        auto result = auth_http_->post_raw(url, body.dump(),
+            {{"Content-Type", "application/json"}});
+        if (result.ok()) {
+            auto& resp = result.value();
+            if (resp.status_code >= 200 && resp.status_code < 300) {
+                return ipc::make_success({{"submitted", true}});
+            }
+            return ipc::make_error("Server returned " + std::to_string(resp.status_code));
+        }
+        return ipc::make_error("Request failed: " + result.error().message);
+    } catch (const std::exception& e) {
+        return ipc::make_error("Failed to submit feedback: " + std::string(e.what()));
+    }
 }
 
 }  // namespace shieldtier

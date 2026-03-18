@@ -167,6 +167,11 @@ inline constexpr const char* kActionGetUrlChains = "get_url_chains";
 // Document Preview
 inline constexpr const char* kActionGetFilePreview = "get_file_preview";
 
+// App Info / Update / Feedback
+inline constexpr const char* kActionGetAppInfo = "get_app_info";
+inline constexpr const char* kActionCheckUpdate = "check_update";
+inline constexpr const char* kActionSubmitFeedback = "submit_feedback";
+
 struct IpcRequest {
     std::string action;
     json payload;

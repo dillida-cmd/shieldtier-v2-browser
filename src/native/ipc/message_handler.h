@@ -225,6 +225,12 @@ private:
 
     // Document Preview
     json handle_get_file_preview(const json& payload);
+
+    // App Info / Update / Feedback
+    json handle_get_app_info(const json& payload);
+    json handle_check_update(const json& payload);
+    json handle_submit_feedback(const json& payload);
+
     std::unordered_map<std::string, json> url_chains_;  // chainId → chain result
 
     SessionManager* session_manager_;

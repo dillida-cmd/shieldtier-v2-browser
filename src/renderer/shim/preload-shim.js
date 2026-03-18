@@ -1024,12 +1024,30 @@
       },
     },
 
-    // ── Auto-updater (V2 uses native updater — stubs intentional) ──
+    // ── App Info ──
+    getAppInfo: function () {
+      return invoke('get_app_info', {});
+    },
+
+    // ── Feedback ──
+    submitFeedback: function (type, message, email, rating) {
+      return invoke('submit_feedback', { type: type, message: message, email: email, rating: rating });
+    },
+
+    // ── Auto-updater ──
     update: {
-      check: function () { return Promise.resolve({ updateAvailable: false }); },
+      check: function () {
+        return invoke('check_update', {}).then(function (v) {
+          return v || { status: 'not-available', currentVersion: '2.0.0' };
+        });
+      },
       download: function () { return Promise.resolve({ success: true }); },
       install: function () { return Promise.resolve({ success: true }); },
-      getState: function () { return Promise.resolve(null); },
+      getState: function () {
+        return invoke('check_update', {}).catch(function () {
+          return { status: 'idle', currentVersion: '2.0.0', availableVersion: null, downloadProgress: 0, error: null };
+        });
+      },
       onStatus: function () { return function () {}; },
     },
 
