@@ -1,0 +1,15 @@
+CEF:0|SecurityVendor|IDS|4.0|100|Brute Force SSH Attack|9|src=203.0.113.45 dst=10.0.0.5 dpt=22 act=blocked cnt=150 msg=SSH brute force detected from 203.0.113.45 cs1Label=AttackType cs1=BruteForce
+CEF:0|SecurityVendor|IDS|4.0|200|SQL Injection Attempt|8|src=198.51.100.10 dst=10.0.0.10 dpt=443 act=blocked msg=SQL injection attempt in login form: ' OR 1=1-- requestUrl=/login.php requestMethod=POST
+CEF:0|SecurityVendor|IDS|4.0|300|Cross-Site Scripting|7|src=198.51.100.10 dst=10.0.0.10 dpt=443 act=detected msg=XSS payload detected: <script>alert(document.cookie)</script> requestUrl=/search?q= requestMethod=GET
+CEF:0|SecurityVendor|IDS|4.0|400|Command Injection|9|src=198.51.100.10 dst=10.0.0.10 dpt=443 act=blocked msg=OS command injection: ; cat /etc/passwd requestUrl=/api/ping requestMethod=POST
+CEF:0|SecurityVendor|IDS|4.0|500|Directory Traversal|6|src=198.51.100.10 dst=10.0.0.10 dpt=443 act=detected msg=Path traversal attempt: ../../../../etc/shadow requestUrl=/download?file= requestMethod=GET
+CEF:0|SecurityVendor|IDS|4.0|600|Malware Download|10|src=10.0.0.50 dst=185.220.101.45 dpt=443 act=detected msg=Malware download detected: beacon.exe SHA256=deadbeef1234 fileHash=deadbeef1234
+CEF:0|SecurityVendor|IDS|4.0|700|C2 Beacon|9|src=10.0.0.50 dst=185.220.101.45 dpt=443 act=detected msg=CobaltStrike beacon traffic pattern detected - interval 300s jitter 10% cnt=48
+CEF:0|SecurityVendor|IDS|4.0|800|Data Exfiltration|8|src=10.0.0.50 dst=185.220.101.45 dpt=443 act=detected msg=Large outbound data transfer: 250MB to known C2 server bytesOut=262144000
+CEF:0|SecurityVendor|IDS|4.0|900|Port Scan|5|src=10.0.0.50 dst=10.0.0.1 act=detected msg=Horizontal port scan detected - 500 ports probed on target cnt=500
+CEF:0|SecurityVendor|IDS|4.0|1000|Privilege Escalation|8|src=10.0.0.50 act=detected msg=Local privilege escalation detected: CVE-2021-4034 PwnKit exploit attempt user=www-data targetUser=root
+CEF:0|SecurityVendor|IDS|4.0|1100|Lateral Movement|8|src=10.0.0.50 dst=10.0.0.20 dpt=445 act=detected msg=SMB lateral movement with PsExec detected suser=CORP\\admin
+CEF:0|SecurityVendor|IDS|4.0|1200|DNS Exfiltration|7|src=10.0.0.50 dst=8.8.8.8 dpt=53 act=detected msg=DNS tunneling detected: 500+ TXT queries to evil-tunnel.example.com with base64 encoded subdomains cnt=523
+CEF:0|SecurityVendor|IDS|4.0|1300|Credential Theft|10|src=10.0.0.50 act=detected msg=LSASS memory access detected - Mimikatz sekurlsa::logonpasswords execution user=CORP\\jsmith
+CEF:0|SecurityVendor|IDS|4.0|1400|Ransomware Activity|10|src=10.0.0.50 act=blocked msg=Ransomware encryption behavior: 1500 files encrypted with .locked extension in 60 seconds cnt=1500
+CEF:0|SecurityVendor|IDS|4.0|1500|Web Shell|9|src=10.0.0.10 act=detected msg=Web shell detected: cmd.exe spawned by w3wp.exe (IIS worker process) on web server requestUrl=/uploads/cmd.aspx

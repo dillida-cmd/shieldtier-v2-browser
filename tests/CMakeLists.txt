@@ -33,10 +33,15 @@ set(TEST_SOURCES
 set(TESTABLE_SOURCES
     ${CMAKE_SOURCE_DIR}/src/native/analysis/fileanalysis/file_analyzer.cpp
     ${CMAKE_SOURCE_DIR}/src/native/analysis/fileanalysis/pe_analyzer.cpp
+    ${CMAKE_SOURCE_DIR}/src/native/analysis/fileanalysis/pdf_analyzer.cpp
+    ${CMAKE_SOURCE_DIR}/src/native/analysis/fileanalysis/archive_analyzer.cpp
+    ${CMAKE_SOURCE_DIR}/src/native/analysis/fileanalysis/office_analyzer.cpp
     ${CMAKE_SOURCE_DIR}/src/native/analysis/content/content_analyzer.cpp
     ${CMAKE_SOURCE_DIR}/src/native/analysis/loganalysis/log_manager.cpp
     ${CMAKE_SOURCE_DIR}/src/native/analysis/loganalysis/log_normalizer.cpp
     ${CMAKE_SOURCE_DIR}/src/native/analysis/loganalysis/log_detector.cpp
+    ${CMAKE_SOURCE_DIR}/src/native/analysis/loganalysis/log_analysis_engine.cpp
+    ${CMAKE_SOURCE_DIR}/src/native/analysis/loganalysis/evtx_parser.cpp
     ${CMAKE_SOURCE_DIR}/src/native/analysis/sandbox/sandbox_engine.cpp
     ${CMAKE_SOURCE_DIR}/src/native/analysis/sandbox/behavior_signatures.cpp
     ${CMAKE_SOURCE_DIR}/src/native/analysis/sandbox/network_profiler.cpp

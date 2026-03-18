@@ -1,0 +1,40 @@
+Mar 15 02:14:01 webserver01 sshd[12340]: Failed password for root from 203.0.113.45 port 52341 ssh2
+Mar 15 02:14:02 webserver01 sshd[12341]: Failed password for root from 203.0.113.45 port 52342 ssh2
+Mar 15 02:14:03 webserver01 sshd[12342]: Failed password for root from 203.0.113.45 port 52343 ssh2
+Mar 15 02:14:04 webserver01 sshd[12343]: Failed password for admin from 203.0.113.45 port 52344 ssh2
+Mar 15 02:14:05 webserver01 sshd[12344]: Failed password for admin from 203.0.113.45 port 52345 ssh2
+Mar 15 02:14:06 webserver01 sshd[12345]: Failed password for admin from 203.0.113.45 port 52346 ssh2
+Mar 15 02:14:07 webserver01 sshd[12346]: Failed password for ubuntu from 203.0.113.45 port 52347 ssh2
+Mar 15 02:14:08 webserver01 sshd[12347]: Invalid user test from 203.0.113.45 port 52348 ssh2
+Mar 15 02:14:09 webserver01 sshd[12348]: Invalid user oracle from 203.0.113.45 port 52349 ssh2
+Mar 15 02:14:10 webserver01 sshd[12349]: Invalid user postgres from 203.0.113.45 port 52350 ssh2
+Mar 15 02:14:11 webserver01 sshd[12350]: Invalid user mysql from 203.0.113.45 port 52351 ssh2
+Mar 15 02:14:12 webserver01 sshd[12351]: Invalid user guest from 203.0.113.45 port 52352 ssh2
+Mar 15 02:14:13 webserver01 sshd[12352]: Invalid user ftpuser from 203.0.113.45 port 52353 ssh2
+Mar 15 02:14:14 webserver01 sshd[12353]: Failed password for root from 198.51.100.22 port 41001 ssh2
+Mar 15 02:14:15 webserver01 sshd[12354]: Failed password for root from 198.51.100.22 port 41002 ssh2
+Mar 15 02:14:16 webserver01 sshd[12355]: Failed password for root from 198.51.100.22 port 41003 ssh2
+Mar 15 02:14:17 webserver01 sshd[12356]: Failed password for root from 198.51.100.22 port 41004 ssh2
+Mar 15 02:14:18 webserver01 sshd[12357]: Failed password for root from 198.51.100.22 port 41005 ssh2
+Mar 15 02:14:19 webserver01 sshd[12358]: Failed password for root from 198.51.100.22 port 41006 ssh2
+Mar 15 02:14:20 webserver01 sshd[12359]: Failed password for root from 198.51.100.22 port 41007 ssh2
+Mar 15 02:14:21 webserver01 sshd[12360]: Accepted password for root from 203.0.113.45 port 52360 ssh2
+Mar 15 02:14:22 webserver01 sshd[12361]: pam_unix(sshd:session): session opened for user root
+Mar 15 02:15:01 webserver01 sudo: root : TTY=pts/0 ; PWD=/root ; USER=root ; COMMAND=/bin/bash
+Mar 15 02:15:30 webserver01 sshd[12370]: Connection closed by 192.0.2.100 port 55001 [preauth]
+Mar 15 02:15:31 webserver01 sshd[12371]: Connection closed by 192.0.2.100 port 55002 [preauth]
+Mar 15 02:15:32 webserver01 sshd[12372]: Connection closed by 192.0.2.100 port 55003 [preauth]
+Mar 15 02:15:33 webserver01 sshd[12373]: Connection closed by 192.0.2.100 port 55004 [preauth]
+Mar 15 02:15:34 webserver01 sshd[12374]: Connection closed by 192.0.2.100 port 55005 [preauth]
+Mar 15 02:15:35 webserver01 sshd[12375]: Connection closed by 192.0.2.100 port 55006 [preauth]
+Mar 15 02:15:36 webserver01 sshd[12376]: Connection closed by 192.0.2.100 port 55007 [preauth]
+Mar 15 02:15:37 webserver01 sshd[12377]: Connection closed by 192.0.2.100 port 55008 [preauth]
+Mar 15 02:15:38 webserver01 sshd[12378]: Connection closed by 192.0.2.100 port 55009 [preauth]
+Mar 15 02:15:39 webserver01 sshd[12379]: Connection closed by 192.0.2.100 port 55010 [preauth]
+Mar 15 02:15:40 webserver01 sshd[12380]: Connection closed by 192.0.2.100 port 55011 [preauth]
+Mar 15 02:15:41 webserver01 sshd[12381]: Connection closed by 192.0.2.100 port 55012 [preauth]
+Mar 15 02:16:00 webserver01 sudo: deploy : authentication failure ; logname=deploy ; uid=1001 ; euid=0 ; tty=/dev/pts/1 ; ruser=deploy ; rhost= ; user=deploy
+Mar 15 02:16:10 webserver01 sudo: deploy : authentication failure ; logname=deploy ; uid=1001 ; euid=0 ; tty=/dev/pts/1 ; ruser=deploy ; rhost= ; user=deploy
+Mar 15 02:16:20 webserver01 sudo: deploy : authentication failure ; logname=deploy ; uid=1001 ; euid=0 ; tty=/dev/pts/1 ; ruser=deploy ; rhost= ; user=deploy
+Mar 15 02:16:30 webserver01 sudo: deploy : authentication failure ; logname=deploy ; uid=1001 ; euid=0 ; tty=/dev/pts/1 ; ruser=deploy ; rhost= ; user=deploy
+Mar 15 02:17:00 webserver01 sshd[12400]: pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=10.0.0.50

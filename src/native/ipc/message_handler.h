@@ -21,10 +21,13 @@
 #include "analysis/email/email_analyzer.h"
 #include "analysis/content/content_analyzer.h"
 #include "analysis/loganalysis/log_manager.h"
+#include "analysis/loganalysis/log_normalizer.h"
+#include "analysis/loganalysis/log_analysis_engine.h"
 #include "analysis/threatfeed/threat_feed_manager.h"
 #include "browser/session_manager.h"
 #include "chat/chat_manager.h"
 #include "capture/capture_manager.h"
+#include "analysis/sandbox/cloud_sandbox.h"
 #include "capture/har_builder.h"
 #include "config/config_store.h"
 #include "export/export_manager.h"
@@ -54,6 +57,8 @@ public:
     void set_ui_client(ShieldTierClient* client) { ui_client_ = client; }
     void auto_analyze(const std::string& sha256);
     CaptureManager* capture_manager() { return capture_manager_.get(); }
+    ThreatFeedManager* threat_feed_manager() { return threat_feed_manager_.get(); }
+    ContentAnalyzer* content_analyzer() { return content_analyzer_.get(); }
 
 private:
     json handle_navigate(CefRefPtr<CefBrowser> browser, const json& payload);
@@ -201,6 +206,27 @@ private:
     json handle_preview_report(const json& payload);
     json handle_save_report(const json& payload);
 
+    // Enrichment
+    json handle_enrichment_query(const json& payload);
+    json handle_enrichment_get_results(const json& payload);
+
+    // Sessions
+    json handle_session_create(const json& payload);
+    json handle_session_destroy(const json& payload);
+    json handle_session_list(const json& payload);
+
+    // Cloud Sandbox
+    json handle_cloud_sandbox_submit(const json& payload);
+    json handle_cloud_sandbox_poll(const json& payload);
+
+    // URL Chain Investigation
+    json handle_investigate_url(const json& payload);
+    json handle_get_url_chains(const json& payload);
+
+    // Document Preview
+    json handle_get_file_preview(const json& payload);
+    std::unordered_map<std::string, json> url_chains_;  // chainId → chain result
+
     SessionManager* session_manager_;
     EventBridge* event_bridge_ = nullptr;
     ShieldTierClient* ui_client_ = nullptr;
@@ -216,6 +242,7 @@ private:
     std::unique_ptr<EmailAnalyzer> email_analyzer_;
     std::unique_ptr<ContentAnalyzer> content_analyzer_;
     std::unique_ptr<LogManager> log_manager_;
+    std::unique_ptr<LogAnalysisEngine> log_analysis_engine_;
     std::unique_ptr<ThreatFeedManager> threat_feed_manager_;
     std::unique_ptr<CaptureManager> capture_manager_;
     std::unique_ptr<ConfigStore> config_store_;
@@ -223,6 +250,7 @@ private:
     std::unique_ptr<VmManager> vm_manager_;
     std::unique_ptr<VmInstaller> vm_installer_;
     std::unique_ptr<ChatManager> chat_manager_;
+    std::unique_ptr<CloudSandboxManager> cloud_sandbox_;
     HarBuilder har_builder_;
 
     std::vector<std::jthread> analysis_threads_;

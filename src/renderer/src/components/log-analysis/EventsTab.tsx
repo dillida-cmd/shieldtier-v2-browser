@@ -112,7 +112,7 @@ export function EventsTab({
                     onClick={() => onToggleExpand(isExpanded ? null : globalIdx)}
                     className="border-t border-[color:var(--st-border-subtle)] cursor-pointer hover:bg-[color:var(--st-accent-dim)] transition-colors"
                   >
-                    <td className="px-3 py-1.5 text-[color:var(--st-text-muted)] font-mono whitespace-nowrap">
+                    <td className="px-3 py-1.5 text-[color:var(--st-text-secondary)] font-mono whitespace-nowrap text-[11px]">
                       {formatTimestamp(evt.timestamp)}
                     </td>
                     <td className="px-2 py-1.5">
@@ -121,14 +121,14 @@ export function EventsTab({
                       </span>
                     </td>
                     <td className="px-2 py-1.5">
-                      <span className="px-1.5 py-0.5 rounded bg-gray-500/10 text-[color:var(--st-text-muted)] text-[9px]">
+                      <span className="px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-300 text-[10px] font-medium">
                         {evt.category}
                       </span>
                     </td>
-                    <td className="px-2 py-1.5 text-[color:var(--st-text-secondary)] font-mono truncate max-w-[128px]">
+                    <td className="px-2 py-1.5 text-[color:var(--st-text-primary)] font-mono truncate max-w-[128px] font-medium text-[11px]">
                       {evt.eventType}
                     </td>
-                    <td className="px-2 py-1.5 text-[color:var(--st-text-muted)] truncate max-w-xs">
+                    <td className="px-2 py-1.5 text-[color:var(--st-text-secondary)] truncate max-w-xs text-[11px]">
                       {truncate(evt.message, 120)}
                     </td>
                   </tr>

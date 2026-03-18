@@ -23,6 +23,9 @@ set(SHIELDTIER_SOURCES
     analysis/yara/rule_manager.cpp
     analysis/fileanalysis/file_analyzer.cpp
     analysis/fileanalysis/pe_analyzer.cpp
+    analysis/fileanalysis/pdf_analyzer.cpp
+    analysis/fileanalysis/archive_analyzer.cpp
+    analysis/fileanalysis/office_analyzer.cpp
     analysis/enrichment/enrichment_manager.cpp
     analysis/enrichment/http_client.cpp
     analysis/sandbox/sandbox_engine.cpp
@@ -38,6 +41,8 @@ set(SHIELDTIER_SOURCES
     analysis/loganalysis/log_manager.cpp
     analysis/loganalysis/log_normalizer.cpp
     analysis/loganalysis/log_detector.cpp
+    analysis/loganalysis/log_analysis_engine.cpp
+    analysis/loganalysis/evtx_parser.cpp
     analysis/threatfeed/threat_feed_manager.cpp
     scoring/scoring_engine.cpp
     capture/capture_manager.cpp
@@ -59,6 +64,7 @@ set(SHIELDTIER_SOURCES
     security/license_manager.cpp
     cloud/cloud_client.cpp
     cloud/rule_sync.cpp
+    analysis/sandbox/cloud_sandbox.cpp
 )
 
 if(APPLE)

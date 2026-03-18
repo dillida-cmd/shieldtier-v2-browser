@@ -6,6 +6,7 @@
 #include <sstream>
 #include <string>
 
+#include "analysis/loganalysis/evtx_parser.h"
 #include "analysis/loganalysis/log_detector.h"
 #include "analysis/loganalysis/log_normalizer.h"
 
@@ -117,11 +118,11 @@ enum class FieldRole { kNone, kTimestamp, kSource, kMessage, kSeverity, kEventTy
 FieldRole classify_header(const std::string& header) {
     std::string h = to_lower(header);
     if (h == "timestamp" || h == "time" || h == "date" || h == "@timestamp" ||
-        h == "datetime" || h == "eventtime") {
+        h == "datetime" || h == "eventtime" || h == "event time" || h == "event_time") {
         return FieldRole::kTimestamp;
     }
     if (h == "source" || h == "src" || h == "hostname" || h == "host" ||
-        h == "computer") {
+        h == "computer" || h == "computer name") {
         return FieldRole::kSource;
     }
     if (h == "message" || h == "msg" || h == "description" || h == "log" ||
@@ -131,7 +132,8 @@ FieldRole classify_header(const std::string& header) {
     if (h == "severity" || h == "level" || h == "priority" || h == "loglevel") {
         return FieldRole::kSeverity;
     }
-    if (h == "event_type" || h == "eventtype" || h == "action" || h == "type") {
+    if (h == "event_type" || h == "eventtype" || h == "action" || h == "type" ||
+        h == "action type" || h == "actiontype") {
         return FieldRole::kEventType;
     }
     return FieldRole::kNone;
@@ -293,7 +295,25 @@ LogFormat LogManager::detect_format(const uint8_t* data, size_t size) {
     if (json_count >= 2) return LogFormat::kJson;
     if (has_w3c_fields) return LogFormat::kW3c;
     if (apache_count >= 2) return LogFormat::kApache;
-    if (csv_consistent_lines >= 3) return LogFormat::kCsv;
+
+    // CSV requires: (a) at least 2 delimiters per line (3+ columns),
+    // (b) first non-empty line should look like a header (not start with a timestamp).
+    // This prevents Windows CBS logs ("2016-09-28 04:30:30, Info CBS ...")
+    // from being misdetected as CSV.
+    if (csv_consistent_lines >= 3 && csv_first_field_count >= 2) {
+        // Check that the first line looks like a header, not a timestamped log entry
+        bool first_looks_like_timestamp = false;
+        if (!sample_lines.empty()) {
+            const auto& first = sample_lines[0];
+            if (first.size() > 10 && is_digit(first[0]) && first[4] == '-' &&
+                is_digit(first[5]) && first[7] == '-') {
+                first_looks_like_timestamp = true;
+            }
+        }
+        if (!first_looks_like_timestamp) {
+            return LogFormat::kCsv;
+        }
+    }
 
     return LogFormat::kAuto;
 }
@@ -313,10 +333,50 @@ Result<std::vector<NormalizedEvent>> LogManager::parse(
         format = detect_format(data, size);
     }
 
-    // Binary formats not yet supported
-    if (format == LogFormat::kEvtx || format == LogFormat::kPcap ||
-        format == LogFormat::kEml || format == LogFormat::kXlsx) {
-        return Error("format not yet supported");
+    // EVTX: proper binary parsing with EventID mapping
+    if (format == LogFormat::kEvtx) {
+        EvtxParser evtx_parser;
+        // Extract filename from the content if available, otherwise use "evtx"
+        return evtx_parser.parse(data, size, "evtx");
+    }
+
+    // XLSX: not supported for direct parsing — user should export to CSV first
+    if (format == LogFormat::kXlsx) {
+        return Error("XLSX files cannot be analyzed directly. Please export to CSV from Excel first, then open the CSV file.");
+    }
+
+    // Other binary formats — extract readable strings as events
+    if (format == LogFormat::kPcap || format == LogFormat::kEml) {
+        std::vector<NormalizedEvent> binary_events;
+        std::string current_string;
+        for (size_t i = 0; i < size && binary_events.size() < kMaxEvents; ++i) {
+            char c = static_cast<char>(data[i]);
+            if ((c >= 32 && c <= 126) || c == '\t') {
+                current_string += c;
+            } else {
+                if (current_string.size() >= 8) {
+                    NormalizedEvent ev;
+                    ev.message = current_string;
+                    ev.event_type = "binary_string";
+                    std::string lower = to_lower(current_string);
+                    if (contains_ci(lower, "error") || contains_ci(lower, "fail") ||
+                        contains_ci(lower, "denied")) {
+                        ev.severity = Severity::kHigh;
+                    } else if (contains_ci(lower, "warn") || contains_ci(lower, "audit")) {
+                        ev.severity = Severity::kMedium;
+                    }
+                    binary_events.push_back(std::move(ev));
+                }
+                current_string.clear();
+            }
+        }
+        if (current_string.size() >= 8 && binary_events.size() < kMaxEvents) {
+            NormalizedEvent ev;
+            ev.message = current_string;
+            ev.event_type = "binary_string";
+            binary_events.push_back(std::move(ev));
+        }
+        return binary_events;
     }
 
     std::string content(reinterpret_cast<const char*>(data), size);
@@ -330,8 +390,95 @@ Result<std::vector<NormalizedEvent>> LogManager::parse(
         case LogFormat::kW3c:    events = parse_w3c(content); break;
         case LogFormat::kApache: events = parse_apache(content); break;
         case LogFormat::kNginx:  events = parse_apache(content); break;  // similar format
-        default:
-            return Error("unable to detect log format");
+        default: {
+            // Fallback: treat as line-by-line text log
+            std::vector<NormalizedEvent> line_events;
+            auto lines = split_lines(content);
+            for (const auto& line : lines) {
+                if (line_events.size() >= kMaxEvents) break;
+                std::string trimmed = trim(line);
+                if (trimmed.empty()) continue;
+
+                NormalizedEvent ev;
+                ev.message = trimmed;
+                ev.event_type = "log_entry";
+
+                // Try to detect severity from common keywords
+                std::string lower = to_lower(trimmed);
+                if (contains_ci(lower, "error") || contains_ci(lower, "fail") ||
+                    contains_ci(lower, "denied") || contains_ci(lower, "exception")) {
+                    ev.severity = Severity::kHigh;
+                } else if (contains_ci(lower, "warn") || contains_ci(lower, "timeout") ||
+                           contains_ci(lower, "retry")) {
+                    ev.severity = Severity::kMedium;
+                } else if (contains_ci(lower, "debug") || contains_ci(lower, "trace")) {
+                    ev.severity = Severity::kInfo;
+                }
+
+                // Try to extract timestamp from start of line (common patterns)
+                // ISO/Windows: 2024-01-15 04:30:30, Level Source Message
+                if (trimmed.size() > 19 && is_digit(trimmed[0]) && trimmed[4] == '-') {
+                    ev.fields["_raw_timestamp"] = trimmed.substr(0, 19);
+                    std::string remainder = trim(trimmed.substr(19));
+
+                    // Strip leading comma (Windows CBS format: "2016-09-28 04:30:30, Info CBS ...")
+                    if (!remainder.empty() && remainder[0] == ',') {
+                        remainder = trim(remainder.substr(1));
+                    }
+
+                    // Try to extract severity level word at start of remainder
+                    auto space_pos = remainder.find_first_of(" \t");
+                    if (space_pos != std::string::npos && space_pos <= 15) {
+                        std::string level_word = remainder.substr(0, space_pos);
+                        std::string level_lower = to_lower(level_word);
+                        if (level_lower == "info" || level_lower == "information" ||
+                            level_lower == "debug" || level_lower == "trace" ||
+                            level_lower == "notice" || level_lower == "verbose") {
+                            ev.severity = map_severity_string(level_word);
+                            remainder = trim(remainder.substr(space_pos));
+                        } else if (level_lower == "warning" || level_lower == "warn") {
+                            ev.severity = Severity::kMedium;
+                            remainder = trim(remainder.substr(space_pos));
+                        } else if (level_lower == "error" || level_lower == "err" ||
+                                   level_lower == "critical" || level_lower == "fatal") {
+                            ev.severity = map_severity_string(level_word);
+                            remainder = trim(remainder.substr(space_pos));
+                        }
+                    }
+
+                    // Try to extract source (next non-space word)
+                    if (!remainder.empty()) {
+                        auto src_end = remainder.find_first_of(" \t");
+                        if (src_end != std::string::npos && src_end <= 20) {
+                            ev.source = remainder.substr(0, src_end);
+                            ev.event_type = ev.source;
+                            remainder = trim(remainder.substr(src_end));
+                        }
+                    }
+
+                    ev.message = remainder;
+                }
+                // Syslog-like: Mon DD HH:MM:SS
+                else if (trimmed.size() > 15 && starts_with_month(trimmed)) {
+                    ev.fields["_raw_timestamp"] = trimmed.substr(0, 15);
+                    if (trimmed.size() > 16) {
+                        std::string remainder = trim(trimmed.substr(16));
+                        // Extract hostname (next word)
+                        auto sp = remainder.find(' ');
+                        if (sp != std::string::npos) {
+                            ev.source = remainder.substr(0, sp);
+                            ev.message = trim(remainder.substr(sp));
+                        } else {
+                            ev.message = remainder;
+                        }
+                    }
+                }
+
+                line_events.push_back(std::move(ev));
+            }
+            events = std::move(line_events);
+            break;
+        }
     }
 
     return events;

@@ -68,7 +68,8 @@ void LogNormalizer::normalize(std::vector<NormalizedEvent>& events) {
 
 void LogNormalizer::normalize_fields(NormalizedEvent& event) {
     if (event.timestamp == 0) {
-        for (const char* key : {"timestamp", "@timestamp", "time", "date", "_raw_timestamp"}) {
+        for (const char* key : {"timestamp", "@timestamp", "time", "date", "_raw_timestamp",
+                                     "Event Time", "Timestamp", "DateTime"}) {
             std::string ts = json_string(event.fields, key);
             if (!ts.empty()) {
                 int64_t parsed = parse_timestamp(ts);
@@ -81,7 +82,8 @@ void LogNormalizer::normalize_fields(NormalizedEvent& event) {
     }
 
     if (event.event_type.empty()) {
-        for (const char* key : {"eventType", "event_type", "action", "ActionType"}) {
+        for (const char* key : {"eventType", "event_type", "action", "ActionType",
+                                 "Action Type", "EventType"}) {
             std::string val = json_string(event.fields, key);
             if (!val.empty()) {
                 event.event_type = val;
@@ -103,22 +105,150 @@ void LogNormalizer::normalize_fields(NormalizedEvent& event) {
 
 void LogNormalizer::extract_canonical_fields(NormalizedEvent& event) {
     set_canonical(event.fields, "_user",
-        {"User", "Username", "user", "username", "TargetUserName", "suser", "duser"});
+        {"User", "Username", "user", "username", "TargetUserName", "SubjectUserName",
+         "suser", "duser", "Account Name", "Account_Name",
+         "Initiating Process Account Name", "Account Domain"});
 
     set_canonical(event.fields, "_src_ip",
-        {"src_ip", "SourceIP", "IpAddress", "ClientIP", "src", "callerIpAddress"});
+        {"src_ip", "SourceIP", "IpAddress", "ClientIP", "src", "callerIpAddress",
+         "client_ip", "c-ip", "rhost", "Local IP"});
 
     set_canonical(event.fields, "_dst_ip",
-        {"dst_ip", "DestinationIP", "RemoteIP", "dst", "destinationAddress"});
+        {"dst_ip", "DestinationIP", "RemoteIP", "Remote IP", "dst", "destinationAddress",
+         "Destination IP", "s-ip", "File Origin IP"});
 
     set_canonical(event.fields, "_host",
-        {"hostname", "Computer", "MachineName", "deviceHostName", "host"});
+        {"hostname", "Computer", "Computer Name", "MachineName", "deviceHostName",
+         "host", "Machine Id", "Remote Computer Name"});
 
     set_canonical(event.fields, "_process",
-        {"Image", "ProcessName", "FileName", "process", "app"});
+        {"Image", "ProcessName", "process", "app",
+         "Initiating Process File Name", "File Name", "FileName"});
 
     set_canonical(event.fields, "_command",
-        {"CommandLine", "ProcessCommandLine", "command", "cmd"});
+        {"CommandLine", "ProcessCommandLine", "Process Command Line", "command", "cmd",
+         "Initiating Process Command Line"});
+
+    set_canonical(event.fields, "_parent_process",
+        {"ParentImage", "ParentProcessName", "Initiating Process Parent File Name"});
+
+    set_canonical(event.fields, "_dst_port",
+        {"dst_port", "DestinationPort", "Remote Port", "dpt"});
+
+    set_canonical(event.fields, "_src_port",
+        {"src_port", "SourcePort", "Local Port", "spt"});
+
+    // ── Extract from message text if structured fields are empty ──
+    // This catches syslog/plaintext logs where the data is in the message.
+
+    std::string msg = event.message;
+    if (msg.empty()) return;
+
+    // Extract IP addresses from message (if _src_ip not already set)
+    if (!event.fields.contains("_src_ip") || !event.fields["_src_ip"].is_string() ||
+        event.fields["_src_ip"].get<std::string>().empty()) {
+        // Pattern: "from X.X.X.X" or "IP=X.X.X.X" or "rhost=X.X.X.X" or "src=X.X.X.X"
+        for (const char* prefix : {"from ", "IP=", "rhost=", "src=", "Source IP: ", "ip="}) {
+            auto pos = msg.find(prefix);
+            if (pos != std::string::npos) {
+                pos += std::strlen(prefix);
+                std::string ip;
+                while (pos < msg.size() && (is_digit(msg[pos]) || msg[pos] == '.')) {
+                    ip += msg[pos++];
+                }
+                // Validate: at least X.X.X.X (7 chars, 3 dots)
+                int dots = 0;
+                for (char c : ip) if (c == '.') dots++;
+                if (ip.size() >= 7 && dots == 3) {
+                    event.fields["_src_ip"] = ip;
+                    break;
+                }
+            }
+        }
+    }
+
+    // Extract username from message (if _user not already set)
+    if (!event.fields.contains("_user") || !event.fields["_user"].is_string() ||
+        event.fields["_user"].get<std::string>().empty()) {
+        // Patterns: "for USER from", "user=USER", "User=USER", "by USER"
+        for (const char* prefix : {"for ", "for invalid user ", "user=", "User=",
+                                    "by ", "User: ", "username="}) {
+            auto pos = msg.find(prefix);
+            if (pos != std::string::npos) {
+                pos += std::strlen(prefix);
+                // Skip "invalid user " in "Failed password for invalid user X"
+                std::string user;
+                while (pos < msg.size() && msg[pos] != ' ' && msg[pos] != ',' &&
+                       msg[pos] != '|' && msg[pos] != '\t' && msg[pos] != ';' &&
+                       msg[pos] != ')' && msg[pos] != '\n') {
+                    user += msg[pos++];
+                }
+                if (!user.empty() && user != "from" && user != "port" && user != "-") {
+                    event.fields["_user"] = user;
+                    break;
+                }
+            }
+        }
+    }
+
+    // Extract command line from message (if _command not already set)
+    if (!event.fields.contains("_command") || !event.fields["_command"].is_string() ||
+        event.fields["_command"].get<std::string>().empty()) {
+        for (const char* prefix : {"CommandLine=", "COMMAND=", "Process=", "Process "}) {
+            auto pos = msg.find(prefix);
+            if (pos != std::string::npos) {
+                pos += std::strlen(prefix);
+                std::string cmd;
+                // Read until end of line or pipe separator
+                while (pos < msg.size() && msg[pos] != '\n' && msg[pos] != '|') {
+                    cmd += msg[pos++];
+                }
+                // Trim trailing whitespace
+                while (!cmd.empty() && (cmd.back() == ' ' || cmd.back() == '\t')) cmd.pop_back();
+                if (cmd.size() >= 3) {
+                    event.fields["_command"] = cmd;
+                    break;
+                }
+            }
+        }
+    }
+
+    // Extract process name from command (if _process not already set)
+    if ((!event.fields.contains("_process") || !event.fields["_process"].is_string() ||
+         event.fields["_process"].get<std::string>().empty()) &&
+        event.fields.contains("_command") && event.fields["_command"].is_string()) {
+        std::string cmd = event.fields["_command"].get<std::string>();
+        // Extract the executable name (first word, or after last backslash)
+        auto bs = cmd.rfind('\\');
+        auto fs = cmd.rfind('/');
+        size_t start = 0;
+        if (bs != std::string::npos) start = bs + 1;
+        if (fs != std::string::npos && fs > start) start = fs + 1;
+        auto end = cmd.find(' ', start);
+        if (end == std::string::npos) end = cmd.size();
+        std::string proc = cmd.substr(start, end - start);
+        if (!proc.empty()) event.fields["_process"] = proc;
+    }
+
+    // Extract host from message (if _host not already set)
+    if (!event.fields.contains("_host") || !event.fields["_host"].is_string() ||
+        event.fields["_host"].get<std::string>().empty()) {
+        for (const char* prefix : {"Computer=", "host=", "hostname="}) {
+            auto pos = msg.find(prefix);
+            if (pos != std::string::npos) {
+                pos += std::strlen(prefix);
+                std::string host;
+                while (pos < msg.size() && msg[pos] != ' ' && msg[pos] != ',' &&
+                       msg[pos] != '|' && msg[pos] != '\t') {
+                    host += msg[pos++];
+                }
+                if (!host.empty()) {
+                    event.fields["_host"] = host;
+                    break;
+                }
+            }
+        }
+    }
 }
 
 int64_t LogNormalizer::parse_timestamp(const std::string& ts) {
