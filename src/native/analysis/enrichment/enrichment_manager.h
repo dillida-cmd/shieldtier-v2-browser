@@ -18,6 +18,8 @@ struct EnrichmentConfig {
     std::string virustotal_api_key;
     std::string abuseipdb_api_key;
     std::string otx_api_key;
+    std::string misp_api_key;
+    std::string misp_base_url;  // e.g., "https://misp.your-org.com"
 };
 
 struct ProviderResult {
@@ -40,6 +42,8 @@ public:
     Result<ProviderResult> query_abuseipdb(const std::string& ip);
     Result<ProviderResult> query_otx(const std::string& hash);
     Result<ProviderResult> query_urlhaus(const std::string& hash);
+    Result<ProviderResult> query_whois(const std::string& domain_or_ip);
+    Result<ProviderResult> query_misp(const std::string& indicator);
 
     void set_config(const EnrichmentConfig& config);
 

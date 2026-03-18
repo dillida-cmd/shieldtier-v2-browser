@@ -41,23 +41,63 @@ function LiveClock() {
 function QuickIOCLookup() {
   const [query, setQuery] = useState('');
   const [checking, setChecking] = useState(false);
-  const [result, setResult] = useState<{ found: boolean; detail: string } | null>(null);
+  const [result, setResult] = useState<{ found: boolean; detail: string; verdict?: string } | null>(null);
+  const [chainResult, setChainResult] = useState<any>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Listen for URL chain updates
+  useEffect(() => {
+    const unsub = (window.shieldtier as any).urlchain?.onUpdate?.((_sid: string, data: any) => {
+      if (data.status === 'complete') {
+        setChainResult(data);
+        setChecking(false);
+        const hops = data.hopCount || 0;
+        const verdict = data.verdict || 'clean';
+        const isMalicious = verdict === 'malicious' || verdict === 'suspicious';
+        setResult({
+          found: isMalicious,
+          verdict,
+          detail: `${hops} hop${hops !== 1 ? 's' : ''} · Final: ${data.finalUrl || '?'} · Verdict: ${verdict.toUpperCase()}${data.riskScore ? ` (${data.riskScore}/100)` : ''}`,
+        });
+      }
+    });
+    return () => { if (unsub) unsub(); };
+  }, []);
 
   const handleCheck = async () => {
     const q = query.trim();
     if (!q) return;
     setChecking(true);
     setResult(null);
+    setChainResult(null);
+
+    const iocType = detectType(q);
+
     try {
-      // Use threatfeed matches with a special check — for now search loaded feeds
-      const stats = await window.shieldtier.threatfeed.getStats();
-      const totalIOCs = stats?.totalIOCs || 0;
-      if (totalIOCs === 0) {
-        setResult({ found: false, detail: 'No threat feeds loaded. Configure feeds in Settings > Integrations.' });
+      if (iocType === 'URL' || iocType === 'Domain') {
+        // URL/Domain → run full chain investigation
+        const urlToCheck = iocType === 'Domain' ? `https://${q}` : q;
+        setResult({ found: false, detail: 'Investigating redirect chain\u2026' });
+        await (window.shieldtier as any).urlchain.investigate('', urlToCheck);
+        // Result arrives via onUpdate event above
+        return;
+      }
+
+      // For non-URL IOCs, run enrichment query
+      const enrichResult = await window.shieldtier.enrichment.query('', q);
+      if (enrichResult && enrichResult.status === 'done') {
+        const v = enrichResult.verdict || 'unknown';
+        const isMalicious = v === 'malicious' || v === 'suspicious';
+        const resultCount = enrichResult.results?.length || 0;
+        setResult({
+          found: isMalicious,
+          verdict: v,
+          detail: `${resultCount} provider${resultCount !== 1 ? 's' : ''} queried · Verdict: ${v.toUpperCase()}`,
+        });
+      } else if (enrichResult && enrichResult.message) {
+        setResult({ found: false, detail: enrichResult.message });
       } else {
-        // TODO: wire to a real IOC lookup IPC once C++ implements it
-        setResult({ found: false, detail: `Not found in ${totalIOCs.toLocaleString()} loaded IOCs.` });
+        setResult({ found: false, detail: 'No results. Configure API keys in Settings > Integrations.' });
       }
     } catch {
       setResult({ found: false, detail: 'Lookup failed. Check your connection.' });
@@ -71,13 +111,20 @@ function QuickIOCLookup() {
     if (/^[a-f0-9]{64}$/i.test(v)) return 'SHA256';
     if (/^\d{1,3}(\.\d{1,3}){3}$/.test(v)) return 'IPv4';
     if (v.includes(':') && /^[a-f0-9:]+$/i.test(v)) return 'IPv6';
-    if (/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(v)) return 'Domain';
     if (/^https?:\/\//i.test(v)) return 'URL';
+    if (/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(v)) return 'Domain';
     return 'IOC';
   };
 
   const trimmed = query.trim();
   const iocType = trimmed ? detectType(trimmed) : '';
+
+  const verdictColor = (v?: string) => {
+    if (v === 'malicious') return 'var(--st-danger)';
+    if (v === 'suspicious') return 'var(--st-warning, #f59e0b)';
+    if (v === 'clean') return 'var(--st-success, #22c55e)';
+    return 'var(--st-text-muted)';
+  };
 
   return (
     <div className="rounded-2xl border border-[color:var(--st-border)] bg-[color:var(--st-bg-elevated)] p-5">
@@ -97,7 +144,7 @@ function QuickIOCLookup() {
           ref={inputRef}
           type="text"
           value={query}
-          onChange={e => { setQuery(e.target.value); setResult(null); }}
+          onChange={e => { setQuery(e.target.value); setResult(null); setChainResult(null); }}
           onKeyDown={e => e.key === 'Enter' && handleCheck()}
           placeholder="Paste IP, domain, hash, or URL..."
           className="flex-1 h-9 bg-[color:var(--st-bg-base)] border border-[color:var(--st-border)] rounded-xl px-3 text-[13px] font-mono text-[color:var(--st-text-primary)] placeholder:text-[color:var(--st-text-muted)] outline-none focus:border-[color:var(--st-accent)] focus:shadow-[0_0_0_3px_var(--st-accent-glow)] transition-all duration-200"
@@ -113,7 +160,7 @@ function QuickIOCLookup() {
               : 'bg-[color:var(--st-bg-base)] text-[color:var(--st-text-muted)] border border-[color:var(--st-border)] opacity-50 cursor-not-allowed'
           )}
         >
-          {checking ? 'Checking\u2026' : 'Check'}
+          {checking ? 'Investigating\u2026' : 'Check'}
         </button>
       </div>
 
@@ -124,12 +171,42 @@ function QuickIOCLookup() {
             ? 'bg-[color:var(--st-danger)]/10 text-[color:var(--st-danger)] border border-[color:var(--st-danger)]/20'
             : 'bg-[color:var(--st-bg-base)] text-[color:var(--st-text-muted)] border border-[color:var(--st-border)]'
         )}>
-          {result.found ? (
-            <span className="flex items-center gap-1.5">
-              <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2"/><path d="M8 5v3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/><circle cx="8" cy="11" r="0.8" fill="currentColor"/></svg>
-              {result.detail}
-            </span>
-          ) : result.detail}
+          {result.verdict && (
+            <span className="inline-block w-2 h-2 rounded-full mr-1.5" style={{ backgroundColor: verdictColor(result.verdict) }} />
+          )}
+          {result.detail}
+        </div>
+      )}
+
+      {/* URL Chain visualization */}
+      {chainResult && chainResult.hops && chainResult.hops.length > 0 && (
+        <div className="mt-3 space-y-1">
+          <div className="text-[10px] font-medium text-[color:var(--st-text-muted)] uppercase tracking-wider mb-1.5">Redirect Chain</div>
+          {chainResult.hops.map((hop: any, i: number) => (
+            <div key={i} className="flex items-center gap-2 text-[10px] font-mono">
+              <span className={cn(
+                'shrink-0 w-5 h-5 rounded flex items-center justify-center text-[9px] font-bold',
+                hop.isThreat ? 'bg-red-500/20 text-red-400' :
+                hop.statusCode >= 300 && hop.statusCode < 400 ? 'bg-yellow-500/20 text-yellow-400' :
+                hop.statusCode === 200 ? 'bg-green-500/20 text-green-400' :
+                'bg-[color:var(--st-bg-base)] text-[color:var(--st-text-muted)]'
+              )}>
+                {hop.statusCode || '?'}
+              </span>
+              <span className="text-[color:var(--st-text-secondary)] truncate flex-1" title={hop.url}>{hop.domain || hop.url}</span>
+              {hop.isThreat && <span className="text-[8px] text-red-400 font-bold shrink-0">THREAT</span>}
+              {i < chainResult.hops.length - 1 && (
+                <svg width="10" height="10" viewBox="0 0 16 16" fill="none" className="text-[color:var(--st-text-muted)] shrink-0">
+                  <path d="M6 3l5 5-5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              )}
+            </div>
+          ))}
+          {chainResult.contentFindings?.length > 0 && (
+            <div className="mt-2 px-2 py-1.5 rounded bg-red-500/10 border border-red-500/20 text-[10px] text-red-400">
+              {chainResult.contentFindings.length} content finding{chainResult.contentFindings.length !== 1 ? 's' : ''} detected in chain
+            </div>
+          )}
         </div>
       )}
     </div>

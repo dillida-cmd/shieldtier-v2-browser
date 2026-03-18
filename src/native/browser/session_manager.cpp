@@ -30,7 +30,8 @@ void SessionManager::set_scheme_handler(const std::string& scheme,
 }
 
 void SessionManager::create_tab(const std::string& url, bool in_memory,
-                                CefRefPtr<CefClient> client) {
+                                CefRefPtr<CefClient> client,
+                                const std::string& proxy_rules) {
     int tab_id = next_tab_id_++;
 
     CefRequestContextSettings ctx_settings;
@@ -41,6 +42,25 @@ void SessionManager::create_tab(const std::string& url, bool in_memory,
 
     CefRefPtr<CefRequestContext> context =
         CefRequestContext::CreateContext(ctx_settings, nullptr);
+
+    // Apply per-session proxy rules if provided.
+    // Format: "socks5://host:port" or "http://host:port" or "direct://"
+    if (!proxy_rules.empty()) {
+        CefRefPtr<CefValue> proxy_val = CefValue::Create();
+        CefRefPtr<CefDictionaryValue> proxy_dict = CefDictionaryValue::Create();
+        proxy_dict->SetString("mode", "fixed_servers");
+        proxy_dict->SetString("server", proxy_rules);
+        proxy_val->SetDictionary(proxy_dict);
+        CefString error;
+        context->SetPreference("proxy", proxy_val, error);
+        if (!error.empty()) {
+            fprintf(stderr, "[ShieldTier] Per-session proxy error: %s\n",
+                    error.ToString().c_str());
+        } else {
+            fprintf(stderr, "[ShieldTier] Per-session proxy set: %s\n",
+                    proxy_rules.c_str());
+        }
+    }
 
     if (scheme_factory_) {
         context->RegisterSchemeHandlerFactory(scheme_name_, scheme_domain_,
@@ -222,6 +242,83 @@ void SessionManager::on_browser_closed(CefRefPtr<CefBrowser> browser) {
         tabs_.erase(tab_it);
     }
     cef_id_to_tab_id_.erase(it);
+}
+
+// ═══════════════════════════════════════════════════════
+// Investigation Session Management (main-process state)
+// ═══════════════════════════════════════════════════════
+
+std::string SessionManager::get_next_case_id() {
+    std::lock_guard<std::mutex> lock(sessions_mutex_);
+    int id = next_case_counter_++;
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "CASE-%06d", id);
+    return buf;
+}
+
+void SessionManager::set_next_case_counter(int counter) {
+    std::lock_guard<std::mutex> lock(sessions_mutex_);
+    next_case_counter_ = counter;
+}
+
+InvestigationSession SessionManager::create_session(
+    const std::string& case_name,
+    const std::string& url,
+    const json& proxy_config) {
+    InvestigationSession session;
+    // Generate unique session ID
+    auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    session.id = "sess-" + std::to_string(now) + "-" +
+                 std::to_string(next_tab_id_);
+    session.case_id = get_next_case_id();
+    session.case_name = case_name.empty() ? "Untitled" : case_name;
+    session.created_at = now;
+    session.url = url;
+    session.partition = "isolated-" + session.id;
+    session.proxy_config = proxy_config;
+
+    std::lock_guard<std::mutex> lock(sessions_mutex_);
+    sessions_[session.id] = session;
+    return session;
+}
+
+void SessionManager::destroy_session(const std::string& session_id) {
+    std::lock_guard<std::mutex> lock(sessions_mutex_);
+    sessions_.erase(session_id);
+}
+
+std::vector<InvestigationSession> SessionManager::list_sessions() const {
+    std::lock_guard<std::mutex> lock(sessions_mutex_);
+    std::vector<InvestigationSession> result;
+    result.reserve(sessions_.size());
+    for (const auto& [id, session] : sessions_) {
+        result.push_back(session);
+    }
+    return result;
+}
+
+InvestigationSession* SessionManager::get_session(
+    const std::string& session_id) {
+    std::lock_guard<std::mutex> lock(sessions_mutex_);
+    auto it = sessions_.find(session_id);
+    if (it == sessions_.end()) return nullptr;
+    return &it->second;
+}
+
+void SessionManager::update_nav_state(const std::string& session_id,
+                                       bool can_back, bool can_forward,
+                                       bool loading, const std::string& url) {
+    std::lock_guard<std::mutex> lock(sessions_mutex_);
+    auto it = sessions_.find(session_id);
+    if (it == sessions_.end()) return;
+    it->second.can_go_back = can_back;
+    it->second.can_go_forward = can_forward;
+    it->second.is_loading = loading;
+    if (!url.empty()) {
+        it->second.current_url = url;
+        it->second.url = url;
+    }
 }
 
 }  // namespace shieldtier

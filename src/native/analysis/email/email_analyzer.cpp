@@ -503,6 +503,20 @@ Result<ParsedEmail> EmailAnalyzer::parse(const uint8_t* data, size_t size) {
         }
     }
 
+    // Parse CC
+    std::string cc_raw = get_header_value(result.headers, "Cc");
+    if (!cc_raw.empty()) {
+        std::istringstream cstream(cc_raw);
+        std::string addr;
+        while (std::getline(cstream, addr, ',')) {
+            std::string trimmed = trim(addr);
+            if (!trimmed.empty()) result.cc.push_back(trimmed);
+        }
+    }
+
+    // Return-Path
+    result.return_path = get_header_value(result.headers, "Return-Path");
+
     // Extract URLs from both bodies
     auto text_urls = extract_urls(result.body_text);
     auto html_urls = extract_urls(result.body_html);
@@ -513,6 +527,10 @@ Result<ParsedEmail> EmailAnalyzer::parse(const uint8_t* data, size_t size) {
     for (const auto& u : html_urls) {
         if (seen.insert(u).second) result.urls_in_body.push_back(u);
     }
+
+    // Parse Received chain and Authentication-Results (V1 parity)
+    parse_received_chain(result);
+    parse_authentication_results(result);
 
     return result;
 }
@@ -1129,31 +1147,231 @@ std::vector<std::string> EmailAnalyzer::extract_urls(const std::string& text) {
     std::unordered_set<std::string> seen;
     std::vector<std::string> urls;
 
-    // Extract bare URLs
-    auto begin = std::sregex_iterator(text.begin(), text.end(), url_regex());
-    auto end = std::sregex_iterator();
-    for (auto it = begin; it != end && urls.size() < kMaxUrls; ++it) {
-        std::string url = (*it)[0].str();
-        // Trim trailing punctuation that's likely not part of the URL
-        while (!url.empty() && (url.back() == '.' || url.back() == ',' ||
-                                url.back() == ')' || url.back() == ';')) {
-            url.pop_back();
-        }
-        if (seen.insert(url).second) {
-            urls.push_back(url);
+    // Fast string-scan URL extraction (no regex — avoids catastrophic backtracking)
+    static const char* schemes[] = {"https://", "http://", "ftp://"};
+
+    for (const char* scheme : schemes) {
+        size_t scheme_len = std::strlen(scheme);
+        size_t pos = 0;
+        while ((pos = text.find(scheme, pos)) != std::string::npos && urls.size() < kMaxUrls) {
+            size_t start = pos;
+            size_t end = pos + scheme_len;
+            // Advance to end of URL (stop at whitespace, quotes, angle brackets, newlines)
+            while (end < text.size() &&
+                   text[end] != ' ' && text[end] != '\t' && text[end] != '\n' &&
+                   text[end] != '\r' && text[end] != '"' && text[end] != '\'' &&
+                   text[end] != '<' && text[end] != '>') {
+                ++end;
+            }
+            std::string url = text.substr(start, end - start);
+            // Trim trailing punctuation
+            while (!url.empty() && (url.back() == '.' || url.back() == ',' ||
+                                    url.back() == ')' || url.back() == ';' ||
+                                    url.back() == ']')) {
+                url.pop_back();
+            }
+            if (url.size() > 10 && seen.insert(url).second) {
+                urls.push_back(url);
+            }
+            pos = end;
         }
     }
 
-    // Extract from href attributes
-    begin = std::sregex_iterator(text.begin(), text.end(), href_regex());
-    for (auto it = begin; it != end && urls.size() < kMaxUrls; ++it) {
-        std::string url = (*it)[1].str();
-        if (seen.insert(url).second) {
-            urls.push_back(url);
+    // Extract from href="..." attributes
+    size_t pos = 0;
+    while ((pos = text.find("href=", pos)) != std::string::npos && urls.size() < kMaxUrls) {
+        pos += 5;
+        if (pos >= text.size()) break;
+        char quote = text[pos];
+        if (quote != '"' && quote != '\'') continue;
+        ++pos;
+        size_t end = text.find(quote, pos);
+        if (end == std::string::npos || end - pos > 2048) { pos++; continue; }
+        std::string url = text.substr(pos, end - pos);
+        if (url.size() > 4 && (url.find("http") == 0 || url.find("//") == 0)) {
+            if (seen.insert(url).second) {
+                urls.push_back(url);
+            }
         }
+        pos = end + 1;
     }
 
     return urls;
+}
+
+// ═══════════════════════════════════════════════════════
+// Received Chain Parser (V1 parity)
+// ═══════════════════════════════════════════════════════
+
+void EmailAnalyzer::parse_received_chain(ParsedEmail& email) {
+    // Collect all Received headers separately (each header = one hop)
+    std::vector<std::string> received_values;
+    for (const auto& h : email.headers) {
+        if (to_lower(h.name) == "received") {
+            received_values.push_back(h.value);
+        }
+    }
+    if (received_values.empty()) return;
+
+    // Each Received header is one hop (NOT newline-split — each header is already separate)
+    for (const auto& line_raw : received_values) {
+        std::string line = trim(line_raw);
+        if (line.empty()) continue;
+        line = trim(line);
+        if (line.empty()) continue;
+
+        ReceivedHop hop;
+        std::string lower = to_lower(line);
+
+        // Extract "from <hostname>"
+        auto from_pos = lower.find("from ");
+        if (from_pos != std::string::npos) {
+            size_t start = from_pos + 5;
+            size_t end = line.find_first_of(" \t(", start);
+            if (end == std::string::npos) end = line.size();
+            hop.from = trim(line.substr(start, end - start));
+        } else {
+            hop.from = "unknown";
+        }
+
+        // Extract "by <hostname>"
+        auto by_pos = lower.find("by ");
+        if (by_pos != std::string::npos) {
+            size_t start = by_pos + 3;
+            size_t end = line.find_first_of(" \t(", start);
+            if (end == std::string::npos) end = line.size();
+            hop.by = trim(line.substr(start, end - start));
+        } else {
+            hop.by = "unknown";
+        }
+
+        // Extract IP address from brackets [x.x.x.x]
+        auto bracket_start = line.find('[');
+        if (bracket_start != std::string::npos) {
+            auto bracket_end = line.find(']', bracket_start);
+            if (bracket_end != std::string::npos) {
+                hop.ip = line.substr(bracket_start + 1, bracket_end - bracket_start - 1);
+            }
+        }
+
+        // Extract timestamp after last semicolon
+        auto semi_pos = line.rfind(';');
+        if (semi_pos != std::string::npos) {
+            std::string date_str = trim(line.substr(semi_pos + 1));
+            // Simple RFC 2822 date parsing: "02 Aug 2023 15:22:55 +0000"
+            struct tm tm = {};
+            // Try common date formats
+            if (strptime(date_str.c_str(), "%a, %d %b %Y %H:%M:%S", &tm) ||
+                strptime(date_str.c_str(), "%d %b %Y %H:%M:%S", &tm)) {
+                hop.timestamp = static_cast<int64_t>(mktime(&tm)) * 1000;  // ms
+            }
+        }
+
+        email.received_chain.push_back(hop);
+    }
+
+    // Received headers are in reverse chronological order — reverse to get oldest first
+    std::reverse(email.received_chain.begin(), email.received_chain.end());
+
+    // Calculate delays between consecutive hops
+    for (size_t i = 1; i < email.received_chain.size(); ++i) {
+        auto& curr = email.received_chain[i];
+        auto& prev = email.received_chain[i - 1];
+        if (curr.timestamp > 0 && prev.timestamp > 0) {
+            curr.delay = static_cast<int>((curr.timestamp - prev.timestamp) / 1000);
+            if (curr.delay < 0) curr.delay = 0;
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════
+// Authentication Results Parser (V1 parity)
+// ═══════════════════════════════════════════════════════
+
+void EmailAnalyzer::parse_authentication_results(ParsedEmail& email) {
+    std::string auth_header = get_header_value(email.headers, "Authentication-Results");
+    if (auth_header.empty()) return;
+
+    // Split by semicolons and newlines
+    std::string delimited = auth_header;
+    for (auto& c : delimited) {
+        if (c == ';' || c == '\n') c = '|';
+    }
+
+    std::istringstream stream(delimited);
+    std::string segment;
+    while (std::getline(stream, segment, '|')) {
+        std::string lower = to_lower(trim(segment));
+        if (lower.empty()) continue;
+
+        // SPF
+        if (lower.find("spf") != std::string::npos) {
+            std::string result_val;
+            for (const char* r : {"pass", "fail", "softfail", "neutral", "none", "temperror", "permerror"}) {
+                if (lower.find(std::string("spf=") + r) != std::string::npos ||
+                    lower.find(std::string("spf ") + r) != std::string::npos) {
+                    result_val = r;
+                    break;
+                }
+            }
+            if (!result_val.empty()) {
+                std::string domain;
+                auto mailfrom_pos = lower.find("smtp.mailfrom=");
+                if (mailfrom_pos != std::string::npos) {
+                    size_t start = mailfrom_pos + 14;
+                    size_t end = lower.find_first_of(" \t;", start);
+                    domain = trim(segment.substr(start, end - start));
+                }
+                email.authentication.push_back({"spf", result_val, domain});
+            }
+        }
+
+        // DKIM
+        if (lower.find("dkim") != std::string::npos) {
+            std::string result_val;
+            for (const char* r : {"pass", "fail", "none", "temperror", "permerror"}) {
+                if (lower.find(std::string("dkim=") + r) != std::string::npos ||
+                    lower.find(std::string("dkim ") + r) != std::string::npos) {
+                    result_val = r;
+                    break;
+                }
+            }
+            if (!result_val.empty()) {
+                std::string domain;
+                auto hdr_pos = lower.find("header.d=");
+                if (hdr_pos == std::string::npos) hdr_pos = lower.find("header.i=");
+                if (hdr_pos != std::string::npos) {
+                    size_t eq = lower.find('=', hdr_pos);
+                    size_t start = eq + 1;
+                    size_t end = lower.find_first_of(" \t;", start);
+                    domain = trim(segment.substr(start, end - start));
+                }
+                email.authentication.push_back({"dkim", result_val, domain});
+            }
+        }
+
+        // DMARC
+        if (lower.find("dmarc") != std::string::npos) {
+            std::string result_val;
+            for (const char* r : {"pass", "fail", "none", "temperror", "permerror"}) {
+                if (lower.find(std::string("dmarc=") + r) != std::string::npos ||
+                    lower.find(std::string("dmarc ") + r) != std::string::npos) {
+                    result_val = r;
+                    break;
+                }
+            }
+            if (!result_val.empty()) {
+                std::string domain;
+                auto hdr_pos = lower.find("header.from=");
+                if (hdr_pos != std::string::npos) {
+                    size_t start = hdr_pos + 12;
+                    size_t end = lower.find_first_of(" \t;", start);
+                    domain = trim(segment.substr(start, end - start));
+                }
+                email.authentication.push_back({"dmarc", result_val, domain});
+            }
+        }
+    }
 }
 
 }  // namespace shieldtier

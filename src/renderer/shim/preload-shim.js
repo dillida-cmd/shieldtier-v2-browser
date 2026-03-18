@@ -38,6 +38,34 @@
     }
   };
 
+  // ── Email normalizer — ensures all required arrays exist ──────────────
+  function normalizeEmail(e) {
+    if (!e || typeof e !== 'object') return e;
+    return {
+      id: e.id || '',
+      sessionId: e.sessionId || '',
+      from: e.from || '',
+      to: Array.isArray(e.to) ? e.to : (e.to ? [e.to] : []),
+      cc: Array.isArray(e.cc) ? e.cc : [],
+      subject: e.subject || '',
+      date: e.date || '',
+      headers: e.headers || {},
+      receivedChain: Array.isArray(e.receivedChain) ? e.receivedChain : [],
+      authentication: Array.isArray(e.authentication) ? e.authentication : [],
+      bodyText: e.bodyText || e.textBody || e.body_text || '',
+      bodyHtml: e.bodyHtml || e.htmlBody || e.body_html || '',
+      textBody: e.textBody || e.bodyText || e.body_text || '',
+      htmlBody: e.htmlBody || e.bodyHtml || e.body_html || '',
+      urls: Array.isArray(e.urls) ? e.urls : [],
+      attachments: Array.isArray(e.attachments) ? e.attachments : [],
+      phishingScore: e.phishingScore || null,
+      rawSource: e.rawSource || '',
+      parsedAt: e.parsedAt || Date.now(),
+      findings: Array.isArray(e.findings) ? e.findings : [],
+      raw_output: e.raw_output || {},
+    };
+  }
+
   // ── IPC invoke via cefQuery ───────────────────────────────────────────
   function invoke(action, payload) {
     var p = new Promise(function (resolve, reject) {
@@ -244,8 +272,18 @@
     if (!Array.isArray(f.sandboxResults)) f.sandboxResults = [];
     if (!f.staticAnalysis) f.staticAnalysis = { findings: [] };
     if (!Array.isArray(f.staticAnalysis.findings)) f.staticAnalysis.findings = [];
+    // Phase 0 crash fix: ensure all numeric/string fields the renderer expects
+    if (typeof f.staticAnalysis.entropy !== 'number') f.staticAnalysis.entropy = 0;
+    if (typeof f.staticAnalysis.fileType !== 'string') f.staticAnalysis.fileType = '';
+    if (typeof f.staticAnalysis.mimeType !== 'string') f.staticAnalysis.mimeType = '';
+    if (!f.staticAnalysis.metadata) f.staticAnalysis.metadata = {};
     if (!f.yaraMatches) f.yaraMatches = [];
     if (!f.enrichment) f.enrichment = {};
+    if (!f.hashes) f.hashes = null;
+    if (typeof f.fileSize !== 'number') f.fileSize = f.size || 0;
+    if (!f.originalName) f.originalName = f.filename || '';
+    if (!f.status) f.status = 'pending';
+    if (!f.riskLevel) f.riskLevel = 'info';
     if (!f.id && f.sha256) f.id = f.sha256;
     return f;
   }
@@ -285,56 +323,41 @@
     // ── Session ──
     session: {
       create: function (config) {
-        var id = generateSessionId();
         var caseName = (config && config.caseName) || 'Untitled';
+        var url = (config && config.url) || '';
+        var proxyConfig = (config && config.proxyConfig) || null;
 
-        // Fetch next case ID from config, then build session with correct shape
-        return invoke('get_config', { key: 'nextCaseId' }).then(function (raw) {
-          // Unwrap: raw might be {success:true, value:N} or just a number
-          var nextId = 1;
-          if (typeof raw === 'number') {
-            nextId = raw;
-          } else if (raw && typeof raw === 'object') {
-            if (typeof raw.value === 'number') nextId = raw.value;
-            else if (typeof raw.data === 'number') nextId = raw.data;
-          }
-          var caseId = 'CASE-' + String(nextId).padStart(6, '0');
-
-          // Increment the counter in config
-          return invoke('set_config', { key: 'nextCaseId', value: nextId + 1 }).catch(function () {}).then(function () {
-            return caseId;
-          });
-        }).catch(function () {
-          // First run or config error — start at 1 and seed the counter
-          invoke('set_config', { key: 'nextCaseId', value: 2 }).catch(function () {});
-          return 'CASE-000001';
-        }).then(function (caseId) {
-          var session = {
-            id: id,
-            caseId: caseId,
-            caseName: caseName,
-            createdAt: Date.now(),
-            url: '',
-            partition: 'isolated-' + id,
-            proxyConfig: undefined,
-            navState: { canGoBack: false, canGoForward: false, isLoading: false, url: '' },
-          };
+        // Delegate to C++ SessionManager — session state survives renderer crashes
+        return invoke('session_create', {
+          caseName: caseName,
+          url: url,
+          proxyConfig: proxyConfig
+        }).then(function (session) {
+          // Keep a local reference for activeSessionId() lookups
           _sessions.push(session);
-
-          if (config && config.url) {
-            session.url = config.url;
-            return invoke('navigate', { url: config.url }).then(function () { return session; });
-          }
           return session;
         });
       },
       destroy: function (sessionId) {
         _sessions = _sessions.filter(function (s) { return s.id !== sessionId; });
-        return invoke('close_tab', { sessionId: sessionId }).catch(function () {
+        // Clear IOC store for this session (match V1's session cleanup)
+        delete _iocStore[sessionId];
+        return invoke('session_destroy', { sessionId: sessionId }).catch(function () {
           return { success: true };
         });
       },
-      list: function () { return Promise.resolve(_sessions); },
+      list: function () {
+        // Fetch authoritative session list from C++ SessionManager
+        return invoke('session_list', {}).then(function (sessions) {
+          if (Array.isArray(sessions)) {
+            _sessions = sessions;
+            return sessions;
+          }
+          return _sessions;
+        }).catch(function () {
+          return _sessions;
+        });
+      },
     },
 
     // ── Proxy ──
@@ -474,26 +497,35 @@
         }
         _iocEmit(sessionId, store[norm]);
 
-        // Simulate enrichment delay then mark as investigated
-        // Real enrichment via API keys will be wired later
-        return new Promise(function (resolve) {
-          setTimeout(function () {
-            if (store[norm]) {
-              store[norm].status = 'done';
-              store[norm].results = [{
-                provider: 'whois',
-                ioc: trimmed,
-                iocType: iocType,
-                verdict: 'unknown',
-                confidence: 0,
-                summary: 'No API keys configured. Add API keys in Settings → Integrations to enable enrichment.',
-                details: {},
-                timestamp: Date.now()
-              }];
-              _iocEmit(sessionId, store[norm]);
-            }
-            resolve(store[norm] || null);
-          }, 500);
+        // Call real C++ EnrichmentManager via IPC
+        return invoke('enrichment_query', {
+          sessionId: sessionId,
+          ioc: trimmed,
+          iocType: iocType
+        }).then(function (data) {
+          if (store[norm]) {
+            store[norm].status = data.status || 'done';
+            store[norm].results = data.results || [];
+            if (data.verdict) store[norm].verdict = data.verdict;
+            _iocEmit(sessionId, store[norm]);
+          }
+          return store[norm] || null;
+        }).catch(function (err) {
+          if (store[norm]) {
+            store[norm].status = 'error';
+            store[norm].results = [{
+              provider: 'error',
+              ioc: trimmed,
+              iocType: iocType,
+              verdict: 'unknown',
+              confidence: 0,
+              summary: err.message || 'Enrichment failed',
+              details: {},
+              timestamp: Date.now()
+            }];
+            _iocEmit(sessionId, store[norm]);
+          }
+          return store[norm] || null;
         });
       },
       getResults: function (sessionId) {
@@ -546,6 +578,9 @@
       analyzeBehavior: function (sessionId, fileId) {
         return invoke('analyze_download', { sha256: fileId });
       },
+      getFilePreview: function (fileId) {
+        return invoke('get_file_preview', { sha256: fileId });
+      },
       analyzeInVM: function (sessionId, fileId, config) {
         return invoke('submit_sample_to_vm', { sessionId: sessionId, fileId: fileId, config: config });
       },
@@ -569,15 +604,28 @@
       },
       onFileUpdate: function (callback) {
         return on('analysis_complete', function (data) {
+          // C++ emits {sha256, result: {status, verdict}}
+          // Flatten into a single object the renderer expects
+          var file = {};
+          if (data && data.result && typeof data.result === 'object') {
+            file = JSON.parse(JSON.stringify(data.result));
+          } else if (data) {
+            file = JSON.parse(JSON.stringify(data));
+          }
+          // Ensure sha256/id are at the top level
+          if (data && data.sha256) {
+            file.sha256 = data.sha256;
+            if (!file.id) file.id = data.sha256;
+          }
           // Auto-register file hashes as IOCs
           var sid = activeSessionId(data);
-          if (data && data.sha256) {
-            _iocAdd(sid, data.sha256, 'hash', 'file_download', false, '');
+          if (file.sha256) {
+            _iocAdd(sid, file.sha256, 'hash', 'file_download', false, '');
           }
-          if (data && data.md5) {
-            _iocAdd(sid, data.md5, 'hash', 'file_download', false, '');
+          if (file.md5) {
+            _iocAdd(sid, file.md5, 'hash', 'file_download', false, '');
           }
-          callback(sid, normalizeFile(data));
+          callback(sid, normalizeFile(file));
         });
       },
     },
@@ -647,22 +695,25 @@
     // ── Email ──
     email: {
       parseRaw: function (sessionId, rawSource) {
-        return invoke('analyze_email', { sessionId: sessionId, rawSource: rawSource });
+        return invoke('analyze_email', { sessionId: sessionId, rawSource: rawSource }).then(normalizeEmail);
       },
       getEmails: function (sessionId) {
         return invoke('get_emails', { sessionId: sessionId }).then(function (v) {
-          return Array.isArray(v) ? v : [];
+          var list = Array.isArray(v) ? v : (v && v.emails ? v.emails : []);
+          return list.map(normalizeEmail);
         });
       },
       getEmail: function (sessionId, emailId) {
-        return invoke('get_email', { sessionId: sessionId, emailId: emailId });
+        return invoke('get_email', { sessionId: sessionId, emailId: emailId }).then(normalizeEmail);
       },
       openFile: function (sessionId) {
-        return invoke('open_email_file', { sessionId: sessionId });
+        return invoke('open_email_file', { sessionId: sessionId }).then(normalizeEmail);
       },
       onEmailParsed: function (callback) {
         return on('email_parsed', function (data) {
-          callback(activeSessionId(data), data);
+          var email = data && data.email ? normalizeEmail(data.email) : normalizeEmail(data);
+          var sid = (data && data.sessionId) || activeSessionId(data);
+          callback(sid, email);
         });
       },
     },
@@ -944,11 +995,30 @@
       },
       onComplete: function (callback) {
         return on('log_complete', function (data) {
-          callback(activeSessionId(data), data);
+          // C++ emits {id, result: LogAnalysisResult} — unwrap
+          var result = (data && data.result && typeof data.result === 'object') ? data.result : data;
+          callback(activeSessionId(data), result);
         });
       },
       onProgress: function (callback) {
         return on('log_progress', function (data) {
+          callback(activeSessionId(data), data);
+        });
+      },
+    },
+
+    // ── URL Chain Investigation ──
+    urlchain: {
+      investigate: function (sessionId, url) {
+        return invoke('investigate_url', { sessionId: sessionId, url: url });
+      },
+      getChains: function () {
+        return invoke('get_url_chains', {}).then(function (v) {
+          return Array.isArray(v) ? v : [];
+        });
+      },
+      onUpdate: function (callback) {
+        return on('url_chain_update', function (data) {
           callback(activeSessionId(data), data);
         });
       },
@@ -971,6 +1041,30 @@
       return 'linux';
     })(),
   };
+
+  // ── C++ enrichment_result → _iocStore sync ──────────────────────────
+  // When C++ pushes enrichment_result events (PDF URIs, email URLs, etc.),
+  // also register them in the shim's _iocStore so getResults() returns them.
+  on('enrichment_result', function (data) {
+    if (!data || !data.value) return;
+    var sid = activeSessionId(data);
+    if (!sid) return;
+    var norm = data.value.toLowerCase();
+    if (!_iocStore[sid]) _iocStore[sid] = {};
+    var store = _iocStore[sid];
+    if (store[norm]) return; // Already registered
+    _iocSeenGlobal[norm] = true;
+    store[norm] = {
+      value: data.value,
+      type: data.type || detectIOCType(data.value) || 'url',
+      source: data.source || 'analysis',
+      firstSeen: data.firstSeen || Date.now(),
+      results: data.results || [],
+      status: data.status || 'pending',
+      safe: !!data.safe,
+      domain: data.domain || ''
+    };
+  });
 
   // ── Server IP auto-registration ──────────────────────────────────────
   // C++ pushes 'server_ip' events from CDP Network.responseReceived

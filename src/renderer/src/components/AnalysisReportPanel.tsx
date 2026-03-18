@@ -4,7 +4,14 @@
  */
 
 import React, { useState, useMemo } from 'react';
+import * as pdfjsLib from 'pdfjs-dist';
 import type { QuarantinedFile } from '../types';
+
+// Configure pdf.js worker (use bundled worker)
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/build/pdf.worker.mjs',
+  import.meta.url
+).toString();
 import { ScoreGauge } from './SandboxResultView';
 import {
   CATEGORY_META, OP_LABELS, RISK_COLORS, MITRE_MAP,
@@ -12,7 +19,7 @@ import {
   type ProcessTreeNode,
 } from './analysis-helpers';
 
-type ReportTab = 'summary' | 'processes' | 'behaviors' | 'network' | 'files' | 'registry';
+type ReportTab = 'summary' | 'processes' | 'behaviors' | 'network' | 'files' | 'registry' | 'preview';
 
 const TAB_DEFS: { id: ReportTab; label: string; icon: React.ReactNode }[] = [
   { id: 'summary', label: 'Summary', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg> },
@@ -21,6 +28,7 @@ const TAB_DEFS: { id: ReportTab; label: string; icon: React.ReactNode }[] = [
   { id: 'network', label: 'Network', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg> },
   { id: 'files', label: 'Files', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg> },
   { id: 'registry', label: 'Registry', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg> },
+  { id: 'preview', label: 'Preview', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg> },
 ];
 
 // ═══════════════════════════════════════════════════════
@@ -156,6 +164,7 @@ export default function AnalysisReportPanel({ files }: { files: Map<string, Quar
         {activeTab === 'network' && <NetworkTab meta={meta} findings={findings} />}
         {activeTab === 'files' && <FilesTab meta={meta} findings={findings} />}
         {activeTab === 'registry' && <RegistryTab meta={meta} findings={findings} />}
+        {activeTab === 'preview' && <DocumentPreviewTab file={activeFile} />}
       </div>
     </div>
   );
@@ -837,6 +846,221 @@ function StatBadge({ label, count, color }: { label: string; count: number; colo
   return (
     <div className={`rounded px-2.5 py-1 border text-[10px] font-medium ${colorMap[color]}`}>
       {label}: <span className="font-mono font-bold">{count}</span>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════
+// PDF Preview — converts data URL to blob URL for CEF rendering
+// ═══════════════════════════════════════════════════════
+
+function PdfPreview({ dataUrl }: { dataUrl: string }) {
+  const [blobUrl, setBlobUrl] = React.useState<string | null>(null);
+  const [pageImages, setPageImages] = React.useState<string[]>([]);
+
+  React.useEffect(() => {
+    // Convert data URL to blob URL
+    try {
+      const parts = dataUrl.split(',');
+      const mimeMatch = parts[0].match(/:(.*?);/);
+      const mime = mimeMatch ? mimeMatch[1] : 'application/pdf';
+      const b64 = parts[1];
+      const bytes = atob(b64);
+      const arr = new Uint8Array(bytes.length);
+      for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+      const blob = new Blob([arr], { type: mime });
+      const url = URL.createObjectURL(blob);
+      setBlobUrl(url);
+
+      // Try rendering with canvas as fallback (for CEF which may not have PDF plugin)
+      renderPdfPages(arr.buffer, 5).then(images => {
+        if (images.length > 0) setPageImages(images);
+      }).catch(() => {});
+
+      return () => URL.revokeObjectURL(url);
+    } catch { /* ignore */ }
+  }, [dataUrl]);
+
+  // If we have rendered page images, show those (works in any browser)
+  if (pageImages.length > 0) {
+    return (
+      <div className="space-y-3">
+        <div className="text-[10px] text-[color:var(--st-text-muted)] px-1">
+          Showing {pageImages.length} page{pageImages.length !== 1 ? 's' : ''}
+        </div>
+        {pageImages.map((img, i) => (
+          <div key={i} className="rounded-lg overflow-hidden border border-[color:var(--st-border)] bg-white shadow-md">
+            <div className="bg-[color:var(--st-bg-panel)] px-2 py-1 text-[9px] text-[color:var(--st-text-muted)] border-b border-[color:var(--st-border)]">
+              Page {i + 1}
+            </div>
+            <img src={img} alt={`Page ${i + 1}`} className="w-full" />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  // Fallback: try embed/iframe with blob URL
+  if (blobUrl) {
+    return (
+      <div className="rounded-lg overflow-hidden border border-[color:var(--st-border)] bg-white">
+        <embed
+          src={blobUrl}
+          type="application/pdf"
+          className="w-full"
+          style={{ height: 'calc(100vh - 200px)', minHeight: '500px' }}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center justify-center h-64 text-[color:var(--st-text-muted)] text-xs">
+      Loading PDF preview...
+    </div>
+  );
+}
+
+// Render PDF pages to canvas images using pdf.js
+async function renderPdfPages(buffer: ArrayBuffer, maxPages: number): Promise<string[]> {
+  try {
+    const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buffer) }).promise;
+    const numPages = Math.min(pdf.numPages, maxPages);
+    const images: string[] = [];
+
+    for (let i = 1; i <= numPages; i++) {
+      const page = await pdf.getPage(i);
+      const scale = 1.5;
+      const viewport = page.getViewport({ scale });
+      const canvas = document.createElement('canvas');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) continue;
+      await page.render({ canvasContext: ctx, viewport }).promise;
+      images.push(canvas.toDataURL('image/png'));
+    }
+    return images;
+  } catch (e) {
+    console.error('[Preview] pdf.js render failed:', e);
+    return [];
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+// Document Preview Tab
+// ═══════════════════════════════════════════════════════
+
+function DocumentPreviewTab({ file }: { file: QuarantinedFile }) {
+  const [preview, setPreview] = React.useState<any>(null);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState('');
+
+  React.useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError('');
+    setPreview(null);
+
+    (async () => {
+      try {
+        const result = await (window.shieldtier as any).fileanalysis.getFilePreview(file.id);
+        if (cancelled) return;
+        if (!result || !result.previewable) {
+          setError(result?.reason || 'This file type cannot be previewed');
+        } else {
+          setPreview(result);
+        }
+      } catch (e: any) {
+        if (!cancelled) setError(e.message || 'Failed to load preview');
+      }
+      if (!cancelled) setLoading(false);
+    })();
+
+    return () => { cancelled = true; };
+  }, [file.id]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64 text-[color:var(--st-text-muted)] text-xs">
+        <div className="flex items-center gap-2">
+          <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" opacity="0.3"/><path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+          Loading preview...
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-64 text-[color:var(--st-text-muted)] text-xs">
+        <div className="text-center">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" className="mx-auto mb-2 text-[color:var(--st-text-muted)]">
+            <rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/>
+          </svg>
+          <p>{error}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!preview) return null;
+
+  const { category, dataUrl, textContent, filename, fileSize, mimeType } = preview;
+
+  return (
+    <div className="p-3 space-y-3">
+      {/* File info bar */}
+      <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-[color:var(--st-bg-panel)] border border-[color:var(--st-border)]">
+        <span className="text-[10px] font-mono text-[color:var(--st-text-secondary)]">{filename}</span>
+        <span className="text-[9px] text-[color:var(--st-text-muted)]">{formatBytes(fileSize)}</span>
+        <span className="text-[9px] px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-400 font-medium">{category.toUpperCase()}</span>
+        <span className="text-[9px] text-[color:var(--st-text-muted)] font-mono">{mimeType}</span>
+      </div>
+
+      {/* Preview content */}
+      {category === 'pdf' && <PdfPreview dataUrl={dataUrl} />}
+
+      {category === 'image' && (
+        <div className="rounded-lg overflow-hidden border border-[color:var(--st-border)] bg-[#1a1a2e] flex items-center justify-center p-4">
+          <img
+            src={dataUrl}
+            alt={filename}
+            className="max-w-full max-h-[70vh] object-contain rounded shadow-lg"
+          />
+        </div>
+      )}
+
+      {(category === 'text') && (
+        <div className="rounded-lg border border-[color:var(--st-border)] bg-[color:var(--st-bg-panel)] overflow-auto" style={{ maxHeight: 'calc(100vh - 200px)' }}>
+          <pre className="p-3 text-[11px] font-mono text-[color:var(--st-text-secondary)] whitespace-pre-wrap break-all">
+            {textContent || '(empty file)'}
+          </pre>
+        </div>
+      )}
+
+      {(category === 'office' || category === 'office-with-thumb') && (
+        <div className="rounded-lg border border-[color:var(--st-border)] bg-[color:var(--st-bg-panel)] p-6 text-center">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" className="mx-auto mb-3 text-[color:var(--st-text-muted)]">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+          </svg>
+          <p className="text-xs text-[color:var(--st-text-secondary)] mb-1">Office Document</p>
+          <p className="text-[10px] text-[color:var(--st-text-muted)]">
+            {filename} ({formatBytes(fileSize)})
+          </p>
+          <p className="text-[10px] text-[color:var(--st-text-muted)] mt-2">
+            Office document preview requires document conversion. Static analysis findings are shown in the Behaviors tab.
+          </p>
+        </div>
+      )}
+
+      {category === 'unsupported' && (
+        <div className="rounded-lg border border-[color:var(--st-border)] bg-[color:var(--st-bg-panel)] p-6 text-center">
+          <p className="text-xs text-[color:var(--st-text-muted)]">
+            Preview not available for this file type ({mimeType})
+          </p>
+        </div>
+      )}
     </div>
   );
 }

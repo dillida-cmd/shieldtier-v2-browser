@@ -127,7 +127,24 @@ export default function LogAnalysisPanel({ session }: Props) {
   // -----------------------------------------------------------------------
 
   const handleOpenFile = useCallback(async () => {
-    await window.shieldtier.loganalysis.openFile(session.id);
+    try {
+      const result = await window.shieldtier.loganalysis.openFile(session.id);
+      if (result && !result.cancelled && result.id) {
+        console.log('[LogAnalysis] openFile result:', result.id, 'events:', Array.isArray(result.events) ? result.events.length : 'missing', 'eventCount:', result.eventCount);
+        // IPC returned the result directly — add it if the event didn't already
+        setAnalyses(prev => {
+          // Update existing or add new
+          const idx = prev.findIndex(a => a.id === result.id);
+          if (idx >= 0) {
+            const next = [...prev];
+            next[idx] = result;
+            return next;
+          }
+          return [...prev, result];
+        });
+        setSelectedId(result.id);
+      }
+    } catch { /* handled by onComplete event */ }
   }, [session.id]);
 
   // -----------------------------------------------------------------------
@@ -186,7 +203,7 @@ export default function LogAnalysisPanel({ session }: Props) {
   // -----------------------------------------------------------------------
 
   const filteredEvents = useMemo(() => {
-    if (!selected?.events) return [];
+    if (!selected?.events || !Array.isArray(selected.events)) return [];
     let evts = selected.events;
     if (eventSeverityFilter) {
       evts = evts.filter(e => e.severity === eventSeverityFilter);
@@ -195,10 +212,10 @@ export default function LogAnalysisPanel({ session }: Props) {
       const q = eventSearch.toLowerCase();
       evts = evts.filter(
         e =>
-          e.message.toLowerCase().includes(q) ||
-          e.eventType.toLowerCase().includes(q) ||
-          e.category.toLowerCase().includes(q) ||
-          e.raw.toLowerCase().includes(q),
+          (e.message || '').toLowerCase().includes(q) ||
+          (e.eventType || '').toLowerCase().includes(q) ||
+          (e.category || '').toLowerCase().includes(q) ||
+          (e.raw || '').toLowerCase().includes(q),
       );
     }
     return evts;

@@ -13,6 +13,20 @@ struct EmailHeader {
     std::string value;
 };
 
+struct ReceivedHop {
+    std::string from;
+    std::string by;
+    int64_t timestamp = 0;   // Unix seconds
+    int delay = 0;           // seconds from previous hop
+    std::string ip;
+};
+
+struct AuthResult {
+    std::string method;      // "spf", "dkim", "dmarc"
+    std::string result;      // "pass", "fail", "softfail", "none", etc.
+    std::string domain;
+};
+
 struct EmailAttachment {
     std::string filename;
     std::string content_type;
@@ -24,13 +38,17 @@ struct ParsedEmail {
     std::string subject;
     std::string from;
     std::vector<std::string> to;
+    std::vector<std::string> cc;
     std::string date;
     std::string message_id;
+    std::string return_path;
     std::string body_text;
     std::string body_html;
     std::vector<EmailHeader> headers;
     std::vector<EmailAttachment> attachments;
     std::vector<std::string> urls_in_body;
+    std::vector<ReceivedHop> received_chain;
+    std::vector<AuthResult> authentication;
 };
 
 class EmailAnalyzer {
@@ -48,6 +66,10 @@ private:
 
     void parse_mime_part(const std::string& part, const std::string& boundary,
                          ParsedEmail& result, int depth = 0);
+
+    // V1-matching header parsers
+    void parse_received_chain(ParsedEmail& email);
+    void parse_authentication_results(ParsedEmail& email);
 };
 
 }  // namespace shieldtier

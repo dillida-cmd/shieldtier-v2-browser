@@ -90,4 +90,38 @@ private:
     DISALLOW_COPY_AND_ASSIGN(StreamingHashFilter);
 };
 
+constexpr size_t kMaxResponseBodyCaptureSize = 1 * 1024 * 1024;  // 1MB
+
+using BodyCaptureCallback = std::function<void(std::string url, std::string body)>;
+
+bool is_text_mime(const std::string& mime);
+
+// Captures text-based response bodies (HTML, JSON, XML, JS, CSS) up to 1MB.
+// Passes all bytes through unchanged — does not modify the response.
+class ResponseBodyCaptureFilter : public CefResponseFilter {
+public:
+    ResponseBodyCaptureFilter(const std::string& url, const std::string& mime_type,
+                              BodyCaptureCallback on_complete);
+    ~ResponseBodyCaptureFilter() override;
+
+    bool InitFilter() override;
+    FilterStatus Filter(void* data_in, size_t data_in_size,
+                        size_t& data_in_read, void* data_out,
+                        size_t data_out_size,
+                        size_t& data_out_written) override;
+
+    const std::string& url() const { return url_; }
+    const std::string& mime_type() const { return mime_type_; }
+
+private:
+    std::string url_;
+    std::string mime_type_;
+    std::string buffer_;
+    bool overflow_ = false;
+    BodyCaptureCallback on_complete_;
+
+    IMPLEMENT_REFCOUNTING(ResponseBodyCaptureFilter);
+    DISALLOW_COPY_AND_ASSIGN(ResponseBodyCaptureFilter);
+};
+
 }  // namespace shieldtier

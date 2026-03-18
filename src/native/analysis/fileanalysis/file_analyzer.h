@@ -45,6 +45,7 @@ public:
                                                      size_t min_length = 4,
                                                      size_t max_strings = 1000);
     static std::string compute_md5(const uint8_t* data, size_t size);
+    static std::string compute_sha1(const uint8_t* data, size_t size);
 
 private:
     std::vector<Finding> generate_findings(const FileInfo& info);

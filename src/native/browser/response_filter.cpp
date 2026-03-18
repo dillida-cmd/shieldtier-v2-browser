@@ -317,4 +317,67 @@ CefResponseFilter::FilterStatus StreamingHashFilter::Filter(
                                      : RESPONSE_FILTER_NEED_MORE_DATA;
 }
 
+// ---------------------------------------------------------------------------
+// is_text_mime
+// ---------------------------------------------------------------------------
+
+bool is_text_mime(const std::string& mime) {
+    if (mime.empty()) return false;
+    // text/* covers text/html, text/css, text/plain, text/xml, etc.
+    if (mime.compare(0, 5, "text/") == 0) return true;
+    if (mime.find("json") != std::string::npos) return true;
+    if (mime.find("javascript") != std::string::npos) return true;
+    if (mime.find("xml") != std::string::npos) return true;
+    return false;
+}
+
+// ---------------------------------------------------------------------------
+// ResponseBodyCaptureFilter
+// ---------------------------------------------------------------------------
+
+ResponseBodyCaptureFilter::ResponseBodyCaptureFilter(
+    const std::string& url, const std::string& mime_type,
+    BodyCaptureCallback on_complete)
+    : url_(url), mime_type_(mime_type), on_complete_(std::move(on_complete)) {}
+
+ResponseBodyCaptureFilter::~ResponseBodyCaptureFilter() = default;
+
+bool ResponseBodyCaptureFilter::InitFilter() {
+    buffer_.reserve(64 * 1024);
+    return true;
+}
+
+CefResponseFilter::FilterStatus ResponseBodyCaptureFilter::Filter(
+    void* data_in, size_t data_in_size, size_t& data_in_read,
+    void* data_out, size_t data_out_size, size_t& data_out_written) {
+
+    if (data_in_size == 0) {
+        data_in_read = 0;
+        data_out_written = 0;
+        if (on_complete_ && !overflow_ && !buffer_.empty()) {
+            on_complete_(url_, std::move(buffer_));
+            on_complete_ = nullptr;
+        }
+        return RESPONSE_FILTER_DONE;
+    }
+
+    size_t to_copy = std::min(data_in_size, data_out_size);
+    std::memcpy(data_out, data_in, to_copy);
+    data_in_read = to_copy;
+    data_out_written = to_copy;
+
+    if (!overflow_) {
+        if (buffer_.size() + to_copy > kMaxResponseBodyCaptureSize) {
+            overflow_ = true;
+            buffer_.clear();
+            buffer_.shrink_to_fit();
+        } else {
+            buffer_.append(static_cast<const char*>(data_in), to_copy);
+        }
+    }
+
+    return (to_copy == data_in_size) ? RESPONSE_FILTER_DONE
+                                     : RESPONSE_FILTER_NEED_MORE_DATA;
+}
+
 }  // namespace shieldtier

@@ -50,6 +50,11 @@ public:
         const std::string& url,
         const std::unordered_map<std::string, std::string>& headers = {});
 
+    /** GET without following redirects — returns 3xx with Location header. */
+    Result<HttpResponse> get_no_follow(
+        const std::string& url,
+        const std::unordered_map<std::string, std::string>& headers = {});
+
     void set_timeout(long timeout_seconds);
     void set_user_agent(const std::string& user_agent);
 

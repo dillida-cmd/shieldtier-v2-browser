@@ -222,6 +222,17 @@ Result<HttpResponse> HttpClient::get_raw(
     return impl_->perform(url, headers);
 }
 
+Result<HttpResponse> HttpClient::get_no_follow(
+    const std::string& url,
+    const std::unordered_map<std::string, std::string>& headers) {
+    // Temporarily disable redirect following for this request
+    curl_easy_setopt(impl_->handle, CURLOPT_FOLLOWLOCATION, 0L);
+    auto result = impl_->perform(url, headers);
+    // Restore default
+    curl_easy_setopt(impl_->handle, CURLOPT_FOLLOWLOCATION, 1L);
+    return result;
+}
+
 void HttpClient::set_timeout(long timeout_seconds) {
     impl_->timeout_seconds = timeout_seconds;
 }

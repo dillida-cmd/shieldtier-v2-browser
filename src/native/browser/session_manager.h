@@ -12,8 +12,29 @@
 #include "include/cef_scheme.h"
 
 #include "common/types.h"
+#include "common/json.h"
 
 namespace shieldtier {
+
+/// Investigation session state — survives renderer crashes.
+/// Mirrors V1's InvestigationSession managed in the Electron main process.
+struct InvestigationSession {
+    std::string id;
+    std::string case_id;
+    std::string case_name;
+    int64_t created_at = 0;
+    std::string url;
+    std::string partition;
+
+    // Navigation state
+    bool can_go_back = false;
+    bool can_go_forward = false;
+    bool is_loading = false;
+    std::string current_url;
+
+    // Per-session proxy (empty = use global)
+    json proxy_config = nullptr;
+};
 
 class SessionManager {
 public:
@@ -27,6 +48,19 @@ public:
         bool in_memory = false;
     };
 
+    // ── Investigation session management ──
+    InvestigationSession create_session(const std::string& case_name,
+                                         const std::string& url,
+                                         const json& proxy_config);
+    void destroy_session(const std::string& session_id);
+    std::vector<InvestigationSession> list_sessions() const;
+    InvestigationSession* get_session(const std::string& session_id);
+    void update_nav_state(const std::string& session_id,
+                          bool can_back, bool can_forward,
+                          bool loading, const std::string& url);
+    std::string get_next_case_id();
+    void set_next_case_counter(int counter);
+
     void set_parent_view(void* view, int width, int height);
 
     void set_scheme_handler(const std::string& scheme,
@@ -34,7 +68,8 @@ public:
                             CefRefPtr<CefSchemeHandlerFactory> factory);
 
     void create_tab(const std::string& url, bool in_memory,
-                    CefRefPtr<CefClient> client);
+                    CefRefPtr<CefClient> client,
+                    const std::string& proxy_rules = "");
     void close_tab(int browser_id);
     CefRefPtr<CefBrowser> get_browser(int browser_id);
     std::vector<TabInfo> get_all_tabs() const;
@@ -69,6 +104,11 @@ private:
 
     std::unordered_map<std::string, FileBuffer> captured_files_;
     std::mutex captured_mutex_;
+
+    // Investigation sessions (main-process state, survives renderer crashes)
+    mutable std::mutex sessions_mutex_;
+    std::unordered_map<std::string, InvestigationSession> sessions_;
+    int next_case_counter_ = 1;
 };
 
 }  // namespace shieldtier

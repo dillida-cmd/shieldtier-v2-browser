@@ -147,6 +147,26 @@ inline constexpr const char* kActionTestProxy = "test_proxy";
 inline constexpr const char* kActionPreviewReport = "preview_report";
 inline constexpr const char* kActionSaveReport = "save_report";
 
+// Enrichment
+inline constexpr const char* kActionEnrichmentQuery = "enrichment_query";
+inline constexpr const char* kActionEnrichmentGetResults = "enrichment_get_results";
+
+// Sessions (main-process state)
+inline constexpr const char* kActionSessionCreate = "session_create";
+inline constexpr const char* kActionSessionDestroy = "session_destroy";
+inline constexpr const char* kActionSessionList = "session_list";
+
+// Cloud Sandbox
+inline constexpr const char* kActionCloudSandboxSubmit = "cloud_sandbox_submit";
+inline constexpr const char* kActionCloudSandboxPoll = "cloud_sandbox_poll";
+
+// URL Chain Investigation
+inline constexpr const char* kActionInvestigateUrl = "investigate_url";
+inline constexpr const char* kActionGetUrlChains = "get_url_chains";
+
+// Document Preview
+inline constexpr const char* kActionGetFilePreview = "get_file_preview";
+
 struct IpcRequest {
     std::string action;
     json payload;

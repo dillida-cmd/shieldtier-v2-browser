@@ -58,7 +58,7 @@ export function EmailPanel({ session }: EmailPanelProps) {
           return [...prev, email];
         });
         // Phase 2 (has phishingScore) -> analysis complete
-        if (email.phishingScore && parseStageRef.current === 'analyzing') {
+        if (email.phishingScore && (parseStageRef.current === 'analyzing' || parseStageRef.current === 'opening')) {
           setParseStage('complete');
           setTimeout(() => setParseStage(''), 1500);
         }
@@ -123,13 +123,18 @@ export function EmailPanel({ session }: EmailPanelProps) {
     setParseStage('opening');
     try {
       const result = await window.shieldtier.email.openFile(session.id);
-      if (!result) {
-        // User cancelled the dialog
+      if (!result || result.cancelled) {
         setParseStage('');
         return;
       }
-      // Files selected — analysis runs in background, email:parsed event triggers completion
+      // openFile returns the full parsed email — analysis is already done
       setParseStage('analyzing');
+      await loadEmails();
+      // If the event didn't already transition us, force complete
+      if (parseStageRef.current === 'analyzing' || parseStageRef.current === 'opening') {
+        setParseStage('complete');
+        setTimeout(() => setParseStage(''), 1500);
+      }
     } catch {
       setParseStage('');
     }
@@ -159,7 +164,6 @@ export function EmailPanel({ session }: EmailPanelProps) {
       <div className="flex items-center gap-1 px-3 py-1.5 border-b border-[color:var(--st-border)]">
         <Button
           onClick={handleOpenFile}
-          disabled={parseStage !== '' && parseStage !== 'complete'}
           variant="outline"
           size="sm"
           aria-label="Open .eml file"
@@ -193,7 +197,7 @@ export function EmailPanel({ session }: EmailPanelProps) {
           <div className="flex justify-end mt-1">
             <Button
               onClick={handlePasteSource}
-              disabled={!pasteText.trim() || (parseStage !== '' && parseStage !== 'complete')}
+              disabled={!pasteText.trim()}
               variant="outline"
               size="sm"
               className="bg-cyan-600/30 text-cyan-400 hover:bg-cyan-600/40 border-cyan-500/30"
@@ -271,7 +275,7 @@ export function EmailPanel({ session }: EmailPanelProps) {
             </div>
           ) : (
             emails.map(email => {
-              const bodySnippet = (email.bodyText || email.bodyHtml || '').replace(/<[^>]*>/g, '').slice(0, 80);
+              const bodySnippet = (email.textBody || email.bodyText || email.htmlBody || email.bodyHtml || '').replace(/<[^>]*>/g, '').slice(0, 80);
               return (
                 <div
                   key={email.id}

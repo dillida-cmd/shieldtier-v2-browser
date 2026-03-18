@@ -16,6 +16,7 @@
 #include "browser/response_filter.h"
 #include "browser/session_manager.h"
 #include "ipc/message_handler.h"
+#include "network/network_policy.h"
 
 namespace shieldtier {
 
@@ -164,6 +165,30 @@ bool RequestHandler::OnBeforeBrowse(CefRefPtr<CefBrowser> browser,
         return true;
     }
 
+    // Block STUN/TURN schemes (WebRTC leak prevention)
+    if (NetworkPolicy::is_stun_turn_scheme(url)) {
+        fprintf(stderr, "[ShieldTier] BLOCKED STUN/TURN: %s\n", url.c_str());
+        return true;
+    }
+
+    // Block DNS-over-HTTPS providers (prevents DNS monitoring bypass)
+    if (!host.empty() && NetworkPolicy::is_doh_provider(host)) {
+        fprintf(stderr, "[ShieldTier] BLOCKED DoH provider: %s\n", host.c_str());
+        return true;
+    }
+
+    // Block localhost hostname (supplements IP-based localhost blocking)
+    if (!host.empty() && NetworkPolicy::is_localhost(host)) {
+        fprintf(stderr, "[ShieldTier] BLOCKED localhost: %s\n", host.c_str());
+        return true;
+    }
+
+    // Apply domain-level policy rules (malware C2, ads, tracking)
+    if (!network_policy_.should_allow(url)) {
+        fprintf(stderr, "[ShieldTier] BLOCKED by network policy: %s\n", url.c_str());
+        return true;
+    }
+
     if (message_router_ && browser->GetIdentifier() == ui_browser_id_) {
         message_router_->OnBeforeBrowse(browser, frame);
     }
@@ -222,6 +247,21 @@ CefRefPtr<CefResponseFilter> RequestHandler::GetResourceResponseFilter(
     if (browser->GetIdentifier() == ui_browser_id_) return nullptr;
 
     if (!is_download_response(request, response)) {
+        // Attach body capture filter for text-based responses when capturing
+        std::string url = request->GetURL().ToString();
+        std::string mime = response->GetMimeType().ToString();
+        int browser_id = browser->GetIdentifier();
+
+        if (capture_manager_ && capture_manager_->is_capturing(browser_id) &&
+            is_text_mime(mime)) {
+            auto* self = this;
+            BodyCaptureCallback on_body = [self, url](
+                std::string /*cb_url*/, std::string body) {
+                std::lock_guard<std::mutex> lock(self->body_mutex_);
+                self->captured_bodies_[url] = std::move(body);
+            };
+            return new ResponseBodyCaptureFilter(url, mime, std::move(on_body));
+        }
         return nullptr;
     }
 
@@ -337,6 +377,17 @@ void RequestHandler::OnResourceLoadComplete(
 
     int browser_id = browser->GetIdentifier();
 
+    // Retrieve captured response body (if any)
+    std::string response_body;
+    {
+        std::lock_guard<std::mutex> lock(body_mutex_);
+        auto bit = captured_bodies_.find(url);
+        if (bit != captured_bodies_.end()) {
+            response_body = std::move(bit->second);
+            captured_bodies_.erase(bit);
+        }
+    }
+
     // Record into CaptureManager (if capturing)
     if (capture_manager_) {
         CapturedRequest cap;
@@ -346,6 +397,7 @@ void RequestHandler::OnResourceLoadComplete(
         cap.response_size = received_content_length;
         cap.mime_type = mime;
         cap.timestamp = ms;
+        cap.response_body = response_body;
         capture_manager_->record_request(browser_id, cap);
     }
 
@@ -481,10 +533,16 @@ void RequestHandler::OnResourceLoadComplete(
                 {"statusText", status_text},
                 {"httpVersion", "HTTP/1.1"},
                 {"headers", resp_header_arr},
-                {"content", {
-                    {"size", received_content_length},
-                    {"mimeType", mime},
-                }},
+                {"content", [&]() {
+                    json content = {
+                        {"size", received_content_length},
+                        {"mimeType", mime},
+                    };
+                    if (!response_body.empty()) {
+                        content["text"] = response_body;
+                    }
+                    return content;
+                }()},
                 {"headersSize", -1},
                 {"bodySize", received_content_length},
             }},
@@ -508,6 +566,62 @@ void RequestHandler::OnResourceLoadComplete(
         }
 
         event_bridge_->push_capture_update(har_entry);
+
+        // Phase 2b: Check captured request against threat feeds (match V1's checkHAREntry)
+        if (threat_feed_manager_) {
+            std::string host = extract_host(url);
+            bool is_threat = false;
+            std::string threat_type;
+            if (!host.empty() && threat_feed_manager_->is_known_threat("domain", host)) {
+                is_threat = true;
+                threat_type = "domain";
+            }
+            if (!is_threat && threat_feed_manager_->is_known_threat("url", url)) {
+                is_threat = true;
+                threat_type = "url";
+            }
+            if (is_threat) {
+                auto indicators = threat_feed_manager_->lookup(threat_type,
+                    threat_type == "domain" ? host : url);
+                json match = {
+                    {"url", url},
+                    {"matchType", threat_type},
+                    {"matchValue", threat_type == "domain" ? host : url},
+                    {"indicators", json::array()},
+                };
+                for (const auto& ind : indicators) {
+                    match["indicators"].push_back({
+                        {"type", ind.type}, {"value", ind.value},
+                        {"source", ind.source}, {"description", ind.description},
+                    });
+                }
+                event_bridge_->push("threatfeed_match", match);
+            }
+        }
+
+        // Phase 2c: Feed response bodies to content analyzer (match V1's analyzeBody)
+        if (content_analyzer_ && !response_body.empty() &&
+            (mime.find("text/html") != std::string::npos ||
+             mime.find("javascript") != std::string::npos)) {
+            FileBuffer content_fb;
+            content_fb.data.assign(response_body.begin(), response_body.end());
+            content_fb.filename = url;
+            content_fb.mime_type = mime;
+            auto result = content_analyzer_->analyze(content_fb);
+            if (result.ok() && !result.value().findings.empty()) {
+                for (const auto& f : result.value().findings) {
+                    json finding = {
+                        {"url", url},
+                        {"title", f.title},
+                        {"description", f.description},
+                        {"severity", f.severity},
+                        {"engine", f.engine},
+                        {"metadata", f.metadata},
+                    };
+                    event_bridge_->push("content_finding", finding);
+                }
+            }
+        }
     }
 }
 

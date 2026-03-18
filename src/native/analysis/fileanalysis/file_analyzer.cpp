@@ -9,6 +9,9 @@
 #include <sstream>
 
 #include "analysis/fileanalysis/pe_analyzer.h"
+#include "analysis/fileanalysis/pdf_analyzer.h"
+#include "analysis/fileanalysis/archive_analyzer.h"
+#include "analysis/fileanalysis/office_analyzer.h"
 #include "common/json.h"
 
 #if defined(__APPLE__)
@@ -195,6 +198,42 @@ std::string FileAnalyzer::compute_md5(const uint8_t* data, size_t size) {
     return oss.str();
 }
 
+std::string FileAnalyzer::compute_sha1(const uint8_t* data, size_t size) {
+    unsigned char digest[20]{};
+
+#if defined(__APPLE__)
+    CC_SHA1(data, static_cast<CC_LONG>(size), digest);
+#elif defined(_WIN32)
+    BCRYPT_ALG_HANDLE hAlg = nullptr;
+    BCRYPT_HASH_HANDLE hHash = nullptr;
+    BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_SHA1_ALGORITHM, nullptr, 0);
+    if (hAlg) {
+        BCryptCreateHash(hAlg, &hHash, nullptr, 0, nullptr, 0, 0);
+        if (hHash) {
+            BCryptHashData(hHash, const_cast<PUCHAR>(data), static_cast<ULONG>(size), 0);
+            BCryptFinishHash(hHash, digest, 20, 0);
+            BCryptDestroyHash(hHash);
+        }
+        BCryptCloseAlgorithmProvider(hAlg, 0);
+    }
+#else
+    EVP_MD_CTX* ctx = EVP_MD_CTX_new();
+    if (!ctx) return std::string(40, '0');
+    EVP_DigestInit_ex(ctx, EVP_sha1(), nullptr);
+    EVP_DigestUpdate(ctx, data, size);
+    unsigned int md_len = 0;
+    EVP_DigestFinal_ex(ctx, digest, &md_len);
+    EVP_MD_CTX_free(ctx);
+#endif
+
+    std::ostringstream oss;
+    for (int i = 0; i < 20; ++i) {
+        oss << std::hex << std::setw(2) << std::setfill('0')
+            << static_cast<int>(digest[i]);
+    }
+    return oss.str();
+}
+
 Result<AnalysisEngineResult> FileAnalyzer::analyze(const FileBuffer& file) {
     auto start = std::chrono::steady_clock::now();
 
@@ -255,6 +294,57 @@ Result<AnalysisEngineResult> FileAnalyzer::analyze(const FileBuffer& file) {
             };
         } else {
             result.raw_output["pe_error"] = pe_result.error().message;
+        }
+    }
+
+    // If PDF, run PDF-specific analysis
+    if (info.type == FileType::kPDF) {
+        PdfAnalyzer pdf_analyzer;
+        auto pdf_result = pdf_analyzer.analyze(file);
+        if (pdf_result.ok()) {
+            auto& pdf_res = pdf_result.value();
+            result.findings.insert(result.findings.end(),
+                                   pdf_res.findings.begin(),
+                                   pdf_res.findings.end());
+            if (pdf_res.raw_output.contains("pdf")) {
+                result.raw_output["pdf"] = pdf_res.raw_output["pdf"];
+            }
+        } else {
+            result.raw_output["pdf_error"] = pdf_result.error().message;
+        }
+    }
+
+    // If ZIP, run archive-specific analysis
+    if (info.type == FileType::kZIP) {
+        ArchiveAnalyzer archive_analyzer;
+        auto archive_result = archive_analyzer.analyze(file);
+        if (archive_result.ok()) {
+            auto& arc_res = archive_result.value();
+            result.findings.insert(result.findings.end(),
+                                   arc_res.findings.begin(),
+                                   arc_res.findings.end());
+            if (arc_res.raw_output.contains("archive")) {
+                result.raw_output["archive"] = arc_res.raw_output["archive"];
+            }
+        } else {
+            result.raw_output["archive_error"] = archive_result.error().message;
+        }
+    }
+
+    // If Office document (OLE2 or OOXML), run Office-specific analysis
+    if (info.type == FileType::kOfficeDoc || info.type == FileType::kOfficeXml) {
+        OfficeAnalyzer office_analyzer;
+        auto office_result = office_analyzer.analyze(file);
+        if (office_result.ok()) {
+            auto& off_res = office_result.value();
+            result.findings.insert(result.findings.end(),
+                                   off_res.findings.begin(),
+                                   off_res.findings.end());
+            if (off_res.raw_output.contains("office")) {
+                result.raw_output["office"] = off_res.raw_output["office"];
+            }
+        } else {
+            result.raw_output["office_error"] = office_result.error().message;
         }
     }
 

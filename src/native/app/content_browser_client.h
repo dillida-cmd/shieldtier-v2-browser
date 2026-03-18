@@ -4,6 +4,7 @@
 #include <string>
 
 #include "include/cef_client.h"
+#include "include/cef_context_menu_handler.h"
 #include "include/cef_display_handler.h"
 #include "include/cef_life_span_handler.h"
 #include "include/cef_load_handler.h"
@@ -14,6 +15,7 @@
 #include "ipc/event_bridge.h"
 
 class ContentBrowserClient : public CefClient,
+                             public CefContextMenuHandler,
                              public CefLifeSpanHandler,
                              public CefDisplayHandler,
                              public CefLoadHandler {
@@ -31,6 +33,17 @@ public:
     CefRefPtr<CefRequestHandler> GetRequestHandler() override { return request_handler_; }
     CefRefPtr<CefDownloadHandler> GetDownloadHandler() override { return download_handler_; }
     CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
+    CefRefPtr<CefContextMenuHandler> GetContextMenuHandler() override { return this; }
+
+    // CefContextMenuHandler — context menu for the sandboxed content browser
+    void OnBeforeContextMenu(CefRefPtr<CefBrowser> browser,
+                             CefRefPtr<CefFrame> frame,
+                             CefRefPtr<CefContextMenuParams> params,
+                             CefRefPtr<CefMenuModel> model) override;
+    bool OnContextMenuCommand(CefRefPtr<CefBrowser> browser,
+                              CefRefPtr<CefFrame> frame,
+                              CefRefPtr<CefContextMenuParams> params,
+                              int command_id, EventFlags event_flags) override;
 
     // CefLifeSpanHandler
     bool OnBeforePopup(CefRefPtr<CefBrowser> browser,

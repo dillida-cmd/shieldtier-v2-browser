@@ -459,11 +459,36 @@ export function AnalysisPanel({ session }: { session: InvestigationSession }) {
                                   <div className="flex items-center gap-2">
                                     <span className={cn('text-[11px] truncate font-mono', entry.safe ? 'text-[color:var(--st-text-muted)]' : 'text-[color:var(--st-text-primary)]')} title={entry.value}>{entry.value}</span>
                                   </div>
-                                  <div className="flex items-center gap-2">
+                                  <div className="flex items-center gap-2 flex-wrap">
                                     {entry.status === 'skipped' ? (
                                       <span className="text-[10px] text-[color:var(--st-text-muted)]">skipped</span>
                                     ) : (
                                       <span className={cn('text-[10px]', colors.text)}>{verdict}</span>
+                                    )}
+                                    {entry.source && (
+                                      <span className={cn(
+                                        'text-[9px] px-1 py-px rounded font-medium',
+                                        entry.source === 'network_traffic' ? 'bg-blue-500/15 text-blue-400' :
+                                        entry.source === 'email' ? 'bg-purple-500/15 text-purple-400' :
+                                        entry.source === 'pdf_attachment' || entry.source === 'pdf_submitform' ? 'bg-orange-500/15 text-orange-400' :
+                                        entry.source === 'pdf_embedded' ? 'bg-orange-500/15 text-orange-400' :
+                                        entry.source === 'file_download' ? 'bg-green-500/15 text-green-400' :
+                                        entry.source === 'server_address' ? 'bg-cyan-500/15 text-cyan-400' :
+                                        entry.source === 'manual' ? 'bg-gray-500/15 text-gray-400' :
+                                        entry.source === 'url_chain' ? 'bg-yellow-500/15 text-yellow-400' :
+                                        'bg-gray-500/15 text-gray-400'
+                                      )}>
+                                        {entry.source === 'network_traffic' ? 'BROWSING' :
+                                         entry.source === 'email' ? 'EMAIL BODY' :
+                                         entry.source === 'pdf_attachment' ? 'PDF /URI' :
+                                         entry.source === 'pdf_submitform' ? 'PDF SUBMIT' :
+                                         entry.source === 'pdf_embedded' ? 'PDF EMBED' :
+                                         entry.source === 'file_download' ? 'DOWNLOAD' :
+                                         entry.source === 'server_address' ? 'SERVER IP' :
+                                         entry.source === 'manual' ? 'MANUAL' :
+                                         entry.source === 'url_chain' ? 'URL CHAIN' :
+                                         entry.source.toUpperCase().replace(/_/g, ' ')}
+                                      </span>
                                     )}
                                     {entry.results.length > 0 && (
                                       <span className="text-[10px] text-[color:var(--st-text-muted)]">{entry.results.length} provider{entry.results.length !== 1 ? 's' : ''}</span>

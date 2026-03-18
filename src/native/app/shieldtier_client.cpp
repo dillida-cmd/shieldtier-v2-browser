@@ -28,6 +28,8 @@ ShieldTierClient::ShieldTierClient(const std::string& root_cache_path)
     request_handler_->set_session_manager(session_manager_.get());
     request_handler_->set_message_handler(message_handler_.get());
     request_handler_->set_capture_manager(message_handler_->capture_manager());
+    request_handler_->set_threat_feed_manager(message_handler_->threat_feed_manager());
+    request_handler_->set_content_analyzer(message_handler_->content_analyzer());
     message_handler_->set_ui_client(this);
 }
 

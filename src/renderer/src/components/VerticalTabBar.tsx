@@ -1,6 +1,5 @@
 import React from 'react';
 import { Badge } from './ui/badge';
-import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from './ui/tooltip';
 import { cn } from '../lib/utils';
 
 export type PanelTab = 'browser' | 'network' | 'screenshots' | 'timeline' | 'analysis' | 'sandbox' | 'vm-sandbox' | 'files' | 'email' | 'logs' | 'mitre' | 'threatfeed';
@@ -39,28 +38,27 @@ const GROUP_STARTS = new Set<PanelTab>(['analysis', 'mitre']);
 
 export function VerticalTabBar({ activePanel, onSelectPanel, badges, captureEnabled, onOpenReport }: VerticalTabBarProps) {
   return (
-    <TooltipProvider delayDuration={200}>
       <div
         className="w-11 border-r border-[color:var(--st-border)] flex flex-col items-center py-1.5 shrink-0"
         style={{ background: 'var(--st-bg-panel)' }}
       >
-        {/* Panel tabs */}
+        {/* Panel tabs — using native title instead of Radix Tooltip to avoid double-click */}
         <div className="flex-1 flex flex-col items-center gap-px" role="tablist" aria-label="Panel navigation">
           {TABS.map(tab => {
             const isActive = activePanel === tab.id;
             const badge = badges[tab.id];
+            const titleText = badge && badge > 0 ? `${tab.label} (${badge})` : tab.label;
             return (
               <React.Fragment key={tab.id}>
                 {GROUP_STARTS.has(tab.id) && (
                   <div className="w-5 h-px bg-[color:var(--st-border)] my-1" />
                 )}
-                <Tooltip>
-                  <TooltipTrigger asChild>
                     <button
                       type="button"
                       role="tab"
                       aria-selected={isActive}
                       aria-label={tab.label}
+                      title={titleText}
                       onClick={() => onSelectPanel(tab.id)}
                       className={cn(
                         'relative w-8 h-8 rounded-md flex items-center justify-center transition-colors cursor-pointer',
@@ -85,14 +83,6 @@ export function VerticalTabBar({ activePanel, onSelectPanel, badges, captureEnab
                         </Badge>
                       )}
                     </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="right" className="text-[11px]">
-                    <span>{tab.label}</span>
-                    {badge !== undefined && badge > 0 && (
-                      <span className="text-[color:var(--st-text-muted)] ml-1">({badge})</span>
-                    )}
-                  </TooltipContent>
-                </Tooltip>
               </React.Fragment>
             );
           })}
@@ -108,11 +98,10 @@ export function VerticalTabBar({ activePanel, onSelectPanel, badges, captureEnab
             </div>
           )}
           {/* Report button */}
-          <Tooltip>
-            <TooltipTrigger asChild>
               <button
                 type="button"
                 onClick={onOpenReport}
+                title="Generate Report"
                 className="w-8 h-8 rounded-md flex items-center justify-center text-[color:var(--st-purple)] hover:bg-[color:var(--st-purple-dim)] transition-colors cursor-pointer"
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -122,11 +111,7 @@ export function VerticalTabBar({ activePanel, onSelectPanel, badges, captureEnab
                   <line x1="16" y1="17" x2="8" y2="17"/>
                 </svg>
               </button>
-            </TooltipTrigger>
-            <TooltipContent side="right" className="text-[11px]">Generate Report</TooltipContent>
-          </Tooltip>
         </div>
       </div>
-    </TooltipProvider>
   );
 }
