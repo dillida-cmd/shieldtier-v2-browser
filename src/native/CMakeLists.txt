@@ -68,7 +68,11 @@ if(APPLE)
     )
 endif()
 
-add_executable(shieldtier ${SHIELDTIER_SOURCES})
+if(OS_WINDOWS)
+    add_executable(shieldtier WIN32 ${SHIELDTIER_SOURCES})
+else()
+    add_executable(shieldtier ${SHIELDTIER_SOURCES})
+endif()
 
 target_include_directories(shieldtier PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -77,6 +81,10 @@ target_include_directories(shieldtier PRIVATE
     ${CMAKE_SOURCE_DIR}/third_party/libarchive/libarchive
     ${CMAKE_BINARY_DIR}  # for libarchive config.h
 )
+
+# libarchive: when linking archive_static, LIBARCHIVE_STATIC must be defined
+# to avoid __declspec(dllimport) on symbols
+target_compile_definitions(shieldtier PRIVATE LIBARCHIVE_STATIC)
 
 target_link_libraries(shieldtier PRIVATE
     libcef_dll_wrapper
@@ -306,10 +314,13 @@ if(OS_WINDOWS)
             "${CEF_ROOT}/Release/libGLESv2.dll"
             "$<TARGET_FILE_DIR:shieldtier>"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CEF_ROOT}/Release/snapshot_blob.bin"
+            "${CEF_ROOT}/Release/v8_context_snapshot.bin"
             "$<TARGET_FILE_DIR:shieldtier>"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CEF_ROOT}/Release/v8_context_snapshot.bin"
+            "${CEF_ROOT}/Release/vk_swiftshader.dll"
+            "$<TARGET_FILE_DIR:shieldtier>"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CEF_ROOT}/Release/vulkan-1.dll"
             "$<TARGET_FILE_DIR:shieldtier>"
         COMMENT "Copying CEF binaries to build dir (Windows)"
     )

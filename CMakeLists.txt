@@ -10,6 +10,9 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # MSVC-specific flags
 if(MSVC)
     add_compile_options(/EHsc)  # C++ exception handling
+    # CEF's libcef_dll_wrapper builds with /MT (static CRT).
+    # All targets must match to avoid LNK2038 RuntimeLibrary mismatch.
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" CACHE STRING "" FORCE)
 endif()
 
 # ---------------------------------------------------------------------------

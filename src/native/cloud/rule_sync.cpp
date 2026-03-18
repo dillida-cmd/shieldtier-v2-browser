@@ -196,6 +196,27 @@ Result<EncryptedRulePackage> RuleSync::download_package(
         // Base64-decode ciphertext, nonce, tag from JSON
         auto decode_b64 = [](const std::string& encoded)
             -> Result<std::vector<uint8_t>> {
+#ifdef SHIELDTIER_NO_SODIUM
+            // Simple base64 decode without libsodium
+            static const std::string b64chars =
+                "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+            std::vector<uint8_t> out;
+            out.reserve(encoded.size() * 3 / 4);
+            int val = 0, valb = -8;
+            for (unsigned char c : encoded) {
+                if (c == '=' || c == '\n' || c == '\r') continue;
+                auto pos = b64chars.find(c);
+                if (pos == std::string::npos)
+                    return Error("Base64 decode failed", "B64_DECODE");
+                val = (val << 6) + static_cast<int>(pos);
+                valb += 6;
+                if (valb >= 0) {
+                    out.push_back(static_cast<uint8_t>((val >> valb) & 0xFF));
+                    valb -= 8;
+                }
+            }
+            return out;
+#else
             size_t max_len = encoded.size();
             std::vector<uint8_t> out(max_len);
             size_t actual_len = 0;
@@ -212,6 +233,7 @@ Result<EncryptedRulePackage> RuleSync::download_package(
 
             out.resize(actual_len);
             return out;
+#endif
         };
 
         auto ct = decode_b64(data.at("ciphertext").get<std::string>());

@@ -20,6 +20,7 @@
 #include <pwd.h>
 #include <unistd.h>
 #elif defined(_WIN32)
+#include <fstream>
 #include <windows.h>
 #include <dpapi.h>
 #include <shlobj.h>

@@ -52,6 +52,7 @@ int main(int argc, char* argv[]) {
     CefString(&settings.root_cache_path) = shieldtier::paths::get_cache_path();
     CefString(&settings.locale) = "en-US";
     settings.log_severity = LOGSEVERITY_WARNING;
+    settings.remote_debugging_port = 9222;
 
 #if defined(OS_MAC)
     {

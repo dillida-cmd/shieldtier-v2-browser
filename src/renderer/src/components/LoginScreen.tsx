@@ -111,12 +111,12 @@ export function LoginScreen({ onAuthenticated }: LoginScreenProps) {
               <path d="M12 16l3 3 5-6" stroke="url(#shieldGrad)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
             </svg>
           </div>
-          <h2 className="text-lg font-bold text-[color:var(--st-text-primary)] mb-1">
+          <h2 className="block text-lg font-bold text-[color:var(--st-text-primary)] mb-1">
             {view === 'login' && 'Sign in to ShieldTier'}
             {view === 'register' && 'Create Your Account'}
             {view === 'verify-pending' && 'Check Your Email'}
           </h2>
-          <p className="text-xs text-[color:var(--st-text-muted)]">
+          <p className="block text-xs text-[color:var(--st-text-muted)]">
             {view === 'login' && 'SOC investigation platform with E2E encrypted collaboration'}
             {view === 'register' && 'Set up your analyst account to get started'}
             {view === 'verify-pending' && 'We sent a verification link to your email'}

@@ -12,6 +12,15 @@ namespace shieldtier {
 std::vector<uint8_t> RuleCrypto::derive_key(
     const std::string& license_key,
     const std::string& hardware_fingerprint) {
+#ifdef SHIELDTIER_NO_SODIUM
+    // Stub: return a deterministic 32-byte key from inputs
+    std::vector<uint8_t> key(32, 0);
+    for (size_t i = 0; i < license_key.size(); ++i)
+        key[i % 32] ^= static_cast<uint8_t>(license_key[i]);
+    for (size_t i = 0; i < hardware_fingerprint.size(); ++i)
+        key[i % 32] ^= static_cast<uint8_t>(hardware_fingerprint[i]);
+    return key;
+#else
     std::vector<uint8_t> key(crypto_aead_xchacha20poly1305_ietf_KEYBYTES);
 
     // Use BLAKE2b keyed hash: message = license_key, key = hardware_fingerprint
@@ -43,6 +52,7 @@ std::vector<uint8_t> RuleCrypto::derive_key(
         hash_key.data(), hash_key.size());
 
     return key;
+#endif
 }
 
 Result<std::vector<uint8_t>> RuleCrypto::decrypt_package(
@@ -53,6 +63,11 @@ Result<std::vector<uint8_t>> RuleCrypto::decrypt_package(
         return Error("Rule package has expired", "RULE_EXPIRED");
     }
 
+#ifdef SHIELDTIER_NO_SODIUM
+    // Stub: cannot decrypt without libsodium
+    (void)key;
+    return Error("Decryption unavailable — libsodium not linked", "NO_SODIUM");
+#else
     if (package.nonce.size() != crypto_aead_xchacha20poly1305_ietf_NPUBBYTES) {
         return Error("Invalid nonce size", "INVALID_NONCE");
     }
@@ -89,6 +104,7 @@ Result<std::vector<uint8_t>> RuleCrypto::decrypt_package(
 
     plaintext.resize(static_cast<size_t>(plaintext_len));
     return plaintext;
+#endif
 }
 
 bool RuleCrypto::is_expired(const EncryptedRulePackage& package) {

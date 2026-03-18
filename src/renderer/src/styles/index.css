@@ -189,6 +189,19 @@
 @keyframes slide-down { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes score-fill { from { --score-progress: 0; } }
 
+/* ── Block-level element reset ──
+   Tailwind v4's @layer base preflight relies on the UA stylesheet for display:block
+   on standard elements, but CSS cascade layers can suppress UA defaults in some
+   Chromium builds (including CEF). Explicitly restore display:block. */
+
+@layer base {
+  div, p, h1, h2, h3, h4, h5, h6, section, article, aside, header, footer,
+  nav, main, figure, figcaption, details, summary, blockquote, pre, hr, ul, ol,
+  li, dl, dt, dd, form, fieldset, legend, address {
+    display: block;
+  }
+}
+
 /* ── Base Styles ── */
 
 body {
