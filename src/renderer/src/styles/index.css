@@ -195,10 +195,22 @@
    Chromium builds (including CEF). Explicitly restore display:block. */
 
 @layer base {
+  /* Restore display:block for standard block elements.
+     CEF + Tailwind v4 cascade layers can suppress UA defaults. */
   div, p, h1, h2, h3, h4, h5, h6, section, article, aside, header, footer,
   nav, main, figure, figcaption, details, summary, blockquote, pre, hr, ul, ol,
   li, dl, dt, dd, form, fieldset, legend, address {
     display: block;
+  }
+
+  /* Restore inline-replaced element defaults */
+  input, textarea, select, button {
+    display: inline-block;
+  }
+
+  /* Force password masking — CEF on Windows can lose -webkit-text-security */
+  input[type="password"] {
+    -webkit-text-security: disc;
   }
 }
 
