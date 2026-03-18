@@ -27,7 +27,7 @@ interface EmailPanelProps {
 export function EmailPanel({ session }: EmailPanelProps) {
   const [emails, setEmails] = useState<ParsedEmail[]>([]);
   const [selectedEmailId, setSelectedEmailId] = useState<string | null>(null);
-  const [detailTab, setDetailTab] = useState<'overview' | 'headers' | 'body' | 'urls' | 'attachments' | 'indicators'>('overview');
+  const [detailTab, setDetailTab] = useState<'overview' | 'headers' | 'body' | 'urls' | 'attachments' | 'indicators'>('body');
   const [showPasteInput, setShowPasteInput] = useState(false);
   const [pasteText, setPasteText] = useState('');
   const [parseStage, setParseStage] = useState<'' | 'opening' | 'analyzing' | 'complete'>('');
@@ -270,44 +270,55 @@ export function EmailPanel({ session }: EmailPanelProps) {
               <div className="text-[10px] text-[color:var(--st-text-muted)]">Open .eml, paste source, or drag & drop</div>
             </div>
           ) : (
-            emails.map(email => (
-              <div
-                key={email.id}
-                onClick={() => { setSelectedEmailId(email.id); setDetailTab('overview'); }}
-                className={`px-3 py-2 cursor-pointer border-b border-[color:var(--st-border-subtle)] hover:bg-[color:var(--st-bg-elevated)] ${
-                  selectedEmailId === email.id ? 'bg-[color:var(--st-bg-elevated)] border-l-2 border-l-cyan-500' : ''
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  {/* Score circle */}
-                  {email.phishingScore && (
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-bold border ${getScoreBg(email.phishingScore.score)}`}>
-                      <span className={getScoreColor(email.phishingScore.score)}>{email.phishingScore.score}</span>
-                    </div>
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[color:var(--st-text-primary)] truncate" title={email.from}>{email.from}</div>
-                    <div className="text-[color:var(--st-text-muted)] truncate" title={email.subject}>{email.subject}</div>
+            emails.map(email => {
+              const bodySnippet = (email.bodyText || email.bodyHtml || '').replace(/<[^>]*>/g, '').slice(0, 80);
+              return (
+                <div
+                  key={email.id}
+                  onClick={() => { setSelectedEmailId(email.id); setDetailTab('body'); }}
+                  className={`px-3 py-2.5 cursor-pointer border-b border-[color:var(--st-border-subtle)] hover:bg-[color:var(--st-bg-elevated)] transition-colors ${
+                    selectedEmailId === email.id ? 'bg-[color:var(--st-bg-elevated)] border-l-2 border-l-cyan-500' : ''
+                  }`}
+                >
+                  {/* From + Date row */}
+                  <div className="flex items-center justify-between">
+                    <span className="text-[color:var(--st-text-primary)] font-medium truncate text-[11px]" title={email.from}>{email.from}</span>
+                    <span className="text-[color:var(--st-text-muted)] text-[10px] shrink-0 ml-2">
+                      {email.date ? new Date(email.date).toLocaleDateString([], { month: 'short', day: 'numeric' }) : ''}
+                    </span>
+                  </div>
+                  {/* Subject */}
+                  <div className="text-[color:var(--st-text-secondary)] truncate text-[11px] mt-0.5" title={email.subject}>
+                    {email.subject || '(no subject)'}
+                  </div>
+                  {/* Body snippet */}
+                  <div className="text-[color:var(--st-text-muted)] truncate text-[10px] mt-0.5">
+                    {bodySnippet || '(empty body)'}
+                  </div>
+                  {/* Tags row */}
+                  <div className="flex items-center gap-1.5 mt-1">
+                    {email.attachments.length > 0 && (
+                      <span className="text-[9px] bg-[color:var(--st-accent-dim)] text-[color:var(--st-text-muted)] px-1 rounded">
+                        {email.attachments.length} attachment{email.attachments.length > 1 ? 's' : ''}
+                      </span>
+                    )}
+                    {email.phishingScore && (
+                      <>
+                        <span className={`text-[9px] px-1.5 rounded font-medium ${getSeverityColor(
+                          email.phishingScore.verdict === 'likely_phishing' ? 'critical' :
+                          email.phishingScore.verdict === 'suspicious' ? 'medium' : 'info'
+                        )}`}>
+                          {getVerdictLabel(email.phishingScore.verdict)}
+                        </span>
+                        <span className={`text-[9px] font-mono ${getScoreColor(email.phishingScore.score)}`}>
+                          {email.phishingScore.score}/100
+                        </span>
+                      </>
+                    )}
                   </div>
                 </div>
-                <div className="flex items-center gap-2 mt-1">
-                  <span className="text-[color:var(--st-text-muted)] text-[10px]">{email.date ? new Date(email.date).toLocaleDateString() : ''}</span>
-                  {email.attachments.length > 0 && (
-                    <span className="text-[9px] bg-[color:var(--st-accent-dim)] text-[color:var(--st-text-muted)] px-1 rounded">
-                      {email.attachments.length} att
-                    </span>
-                  )}
-                  {email.phishingScore && (
-                    <span className={`text-[9px] px-1.5 rounded ${getSeverityColor(
-                      email.phishingScore.verdict === 'likely_phishing' ? 'critical' :
-                      email.phishingScore.verdict === 'suspicious' ? 'medium' : 'info'
-                    )}`}>
-                      {getVerdictLabel(email.phishingScore.verdict)}
-                    </span>
-                  )}
-                </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
 
@@ -315,22 +326,25 @@ export function EmailPanel({ session }: EmailPanelProps) {
         <div className="flex-1 flex flex-col overflow-hidden">
           {selectedEmail ? (
             <Tabs value={detailTab} onValueChange={(v) => setDetailTab(v as typeof detailTab)} className="flex flex-col flex-1 overflow-hidden">
-              {/* Detail tabs */}
+              {/* Detail tabs — Body first (read email), then investigate */}
               <TabsList className="px-3 py-1.5 bg-[color:var(--st-bg-panel)]">
-                {(['overview', 'headers', 'body', 'urls', 'attachments', 'indicators'] as const).map(tab => (
-                  <TabsTrigger key={tab} value={tab} className="capitalize">
-                    {tab}
-                    {tab === 'urls' && selectedEmail.urls.length > 0 && (
-                      <Badge size="sm" variant="outline" className="ml-1">{selectedEmail.urls.length}</Badge>
-                    )}
-                    {tab === 'attachments' && selectedEmail.attachments.length > 0 && (
-                      <Badge size="sm" variant="outline" className="ml-1">{selectedEmail.attachments.length}</Badge>
-                    )}
-                    {tab === 'indicators' && selectedEmail.phishingScore && (
-                      <Badge size="sm" variant="outline" className="ml-1">{selectedEmail.phishingScore.indicators.length}</Badge>
-                    )}
-                  </TabsTrigger>
-                ))}
+                {(['body', 'headers', 'urls', 'attachments', 'overview', 'indicators'] as const).map(tab => {
+                  const label = tab === 'overview' ? 'Analysis' : tab;
+                  return (
+                    <TabsTrigger key={tab} value={tab} className="capitalize">
+                      {label}
+                      {tab === 'urls' && selectedEmail.urls.length > 0 && (
+                        <Badge size="sm" variant="outline" className="ml-1">{selectedEmail.urls.length}</Badge>
+                      )}
+                      {tab === 'attachments' && selectedEmail.attachments.length > 0 && (
+                        <Badge size="sm" variant="outline" className="ml-1">{selectedEmail.attachments.length}</Badge>
+                      )}
+                      {tab === 'indicators' && selectedEmail.phishingScore && (
+                        <Badge size="sm" variant="outline" className="ml-1">{selectedEmail.phishingScore.indicators.length}</Badge>
+                      )}
+                    </TabsTrigger>
+                  );
+                })}
               </TabsList>
 
               {/* Detail content */}
@@ -366,7 +380,14 @@ export function EmailPanel({ session }: EmailPanelProps) {
             </Tabs>
           ) : (
             <div className="flex items-center justify-center h-full text-[color:var(--st-text-muted)] text-sm">
-              Select an email to view analysis
+              <div className="text-center">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" className="mx-auto mb-3 opacity-30">
+                  <rect x="2" y="4" width="20" height="16" rx="2" />
+                  <path d="M22 7l-10 6L2 7" />
+                </svg>
+                <div>Select an email to read</div>
+                <div className="text-[10px] mt-1 opacity-60">Body preview opens first, then investigate</div>
+              </div>
             </div>
           )}
         </div>
