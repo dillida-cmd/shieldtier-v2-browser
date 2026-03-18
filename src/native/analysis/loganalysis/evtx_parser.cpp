@@ -95,7 +95,11 @@ std::string EvtxParser::filetime_to_iso(uint64_t ft) {
     if (secs <= kEpochDiff) return "";
     time_t unix_ts = static_cast<time_t>(secs - kEpochDiff);
     struct tm tm;
+#ifdef _WIN32
+    gmtime_s(&tm, &unix_ts);
+#else
     gmtime_r(&unix_ts, &tm);
+#endif
     char buf[32];
     strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &tm);
     return buf;
