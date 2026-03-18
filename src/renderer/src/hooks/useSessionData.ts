@@ -132,13 +132,18 @@ export function useSessionData(session: InvestigationSession): SessionData {
     return () => { unsub(); };
   }, [session.id]);
 
-  // Create BrowserView on mount
+  // Create BrowserView on mount + auto-enable capture (matches V1 behavior)
   useEffect(() => {
     let mounted = true;
     (async () => {
       const result = await window.shieldtier.view.create(session.id);
       if (mounted && result.success) {
         setViewReady(true);
+      }
+      // Auto-enable capture on session creation (V1 does this automatically)
+      const captureResult = await window.shieldtier.capture.enable(session.id);
+      if (mounted && captureResult.success) {
+        setCaptureEnabled(true);
       }
     })();
     return () => { mounted = false; };
