@@ -114,8 +114,20 @@ bool MessageHandler::OnQuery(CefRefPtr<CefBrowser> browser,
 
         // Handle simple actions before the long else-if chain to avoid
         // MSVC C1061 "blocks nested too deeply" compiler limit.
-        if (req.action == ipc::kActionWsbFocusWindow) {
-            callback->Success(handle_wsb_focus_window(req.payload).dump());
+        // Handle actions before the long else-if chain to avoid
+        // MSVC C1061 "blocks nested too deeply" compiler limit.
+        static const std::unordered_map<std::string, std::function<json(MessageHandler*, const json&)>> early_handlers = {
+            {ipc::kActionWsbFocusWindow, [](MessageHandler* h, const json& p) { return h->handle_wsb_focus_window(p); }},
+            {ipc::kActionGetAppInfo, [](MessageHandler* h, const json& p) { return h->handle_get_app_info(p); }},
+            {ipc::kActionCheckUpdate, [](MessageHandler* h, const json& p) { return h->handle_check_update(p); }},
+            {ipc::kActionSubmitFeedback, [](MessageHandler* h, const json& p) { return h->handle_submit_feedback(p); }},
+            {ipc::kActionGetFilePreview, [](MessageHandler* h, const json& p) { return h->handle_get_file_preview(p); }},
+            {ipc::kActionInvestigateUrl, [](MessageHandler* h, const json& p) { return h->handle_investigate_url(p); }},
+            {ipc::kActionGetUrlChains, [](MessageHandler* h, const json& p) { return h->handle_get_url_chains(p); }},
+        };
+        auto early_it = early_handlers.find(req.action);
+        if (early_it != early_handlers.end()) {
+            callback->Success(early_it->second(this, req.payload).dump());
             return true;
         }
 
@@ -389,19 +401,6 @@ bool MessageHandler::OnQuery(CefRefPtr<CefBrowser> browser,
             result = handle_cloud_sandbox_submit(req.payload);
         } else if (req.action == ipc::kActionCloudSandboxPoll) {
             result = handle_cloud_sandbox_poll(req.payload);
-        // URL Chain Investigation
-        } else if (req.action == ipc::kActionInvestigateUrl) {
-            result = handle_investigate_url(req.payload);
-        } else if (req.action == ipc::kActionGetUrlChains) {
-            result = handle_get_url_chains(req.payload);
-        } else if (req.action == ipc::kActionGetFilePreview) {
-            result = handle_get_file_preview(req.payload);
-        } else if (req.action == ipc::kActionGetAppInfo) {
-            result = handle_get_app_info(req.payload);
-        } else if (req.action == ipc::kActionCheckUpdate) {
-            result = handle_check_update(req.payload);
-        } else if (req.action == ipc::kActionSubmitFeedback) {
-            result = handle_submit_feedback(req.payload);
         } else {
             callback->Failure(404, ipc::make_error("unknown_action").dump());
             return true;
@@ -807,6 +806,7 @@ json MessageHandler::handle_start_vm(const json& payload) {
 
 json MessageHandler::handle_stop_vm(const json& payload) {
     std::string vm_id = payload.value("vm_id", "");
+    if (vm_id.empty()) vm_id = payload.value("instanceId", "");
 
     // Try stopping a Windows Sandbox session first.
     std::string wsb_session;
@@ -866,6 +866,161 @@ json MessageHandler::handle_wsb_focus_window(const json& /*payload*/) {
 #else
     return ipc::make_error("windows_only");
 #endif
+}
+
+// Helper: build VM analysis result from collected events (extracted to
+// reduce nesting depth and avoid MSVC C1061 compiler limit).
+static json build_wsb_result(const std::string& session_id,
+                              const json& events_arr,
+                              int poll_elapsed) {
+    auto safe_str = [](const json& j, const char* key) -> std::string {
+        if (!j.contains(key)) return "";
+        auto& v = j[key];
+        if (v.is_null()) return "";
+        if (v.is_string()) return v.get<std::string>();
+        return v.dump();
+    };
+    auto safe_int = [](const json& j, const char* key) -> int {
+        if (!j.contains(key)) return 0;
+        auto& v = j[key];
+        if (v.is_number()) return v.get<int>();
+        return 0;
+    };
+
+    json findings = json::array();
+    json processes = json::array();
+    json file_ops = json::array();
+    json registry_ops = json::array();
+    int process_count = 0;
+
+    for (const auto& ev : events_arr) {
+        auto cat = safe_str(ev, "category");
+        auto act = safe_str(ev, "action");
+        if (cat == "process" && act == "create") {
+            process_count++;
+            processes.push_back({
+                {"pid", safe_int(ev, "pid")},
+                {"name", safe_str(ev, "name")},
+                {"commandLine", safe_str(ev, "path")},
+            });
+        } else if (cat == "file") {
+            file_ops.push_back({
+                {"operation", act},
+                {"path", safe_str(ev, "path")},
+            });
+        } else if (cat == "registry") {
+            registry_ops.push_back({
+                {"operation", act},
+                {"key", safe_str(ev, "key")},
+                {"detail", safe_str(ev, "detail")},
+            });
+        }
+    }
+
+    int score = 0;
+    if (process_count > 5) score += 20;
+    if (!file_ops.empty()) score += 15;
+    if (!registry_ops.empty()) score += 25;
+    for (const auto& f : file_ops) {
+        auto p = f.value("path", "");
+        if (p.find("Startup") != std::string::npos) {
+            score += 20;
+            findings.push_back({{"severity","high"},{"category","persistence"},
+                {"description","File dropped in Startup folder: " + p}});
+        }
+        if (p.find("payload") != std::string::npos) {
+            score += 10;
+            findings.push_back({{"severity","medium"},{"category","file_drop"},
+                {"description","Suspicious file created: " + p}});
+        }
+        if (p.find("svchost") != std::string::npos) {
+            score += 15;
+            findings.push_back({{"severity","high"},{"category","masquerading"},
+                {"description","File masquerading as system process: " + p}});
+        }
+    }
+    for (const auto& r : registry_ops) {
+        auto k = r.value("key", "") + r.value("detail", "");
+        if (k.find("Run") != std::string::npos) {
+            score += 25;
+            findings.push_back({{"severity","high"},{"category","persistence"},
+                {"description","Registry Run key modified"}});
+        }
+        if (k.find("service") != std::string::npos || k.find("Service") != std::string::npos) {
+            score += 15;
+            findings.push_back({{"severity","medium"},{"category","persistence"},
+                {"description","New service installed"}});
+        }
+    }
+    if (score > 100) score = 100;
+
+    std::string verdict = score >= 70 ? "malicious" : score >= 30 ? "suspicious" : "clean";
+
+    json stored = {
+        {"vm_id", session_id},
+        {"provider", "windows_sandbox"},
+        {"success", true},
+        {"duration_ms", poll_elapsed * 1000.0},
+        {"events", events_arr},
+        {"event_count", events_arr.size()},
+        {"verdict", verdict},
+        {"score", score},
+        {"riskLevel", verdict},
+        {"executionDurationMs", poll_elapsed * 1000.0},
+        {"processTree", processes},
+        {"processCount", process_count},
+        {"fileOperations", file_ops},
+        {"registryOperations", registry_ops},
+        {"findings", findings},
+        {"networkConnections", json::array()},
+        {"memoryAllocations", json::array()},
+        {"screenshots", json::array()},
+        {"mitreTechniques", json::array()},
+        {"networkSummary", {
+            {"totalConnections", 0},
+            {"uniqueHosts", json::array()},
+            {"uniqueURLs", json::array()},
+            {"dnsQueries", json::array()},
+            {"httpRequests", 0},
+        }},
+    };
+
+    // Build SandboxResult for AnalysisReportPanel
+    json sandbox_result = {
+        {"provider", "windows_sandbox"},
+        {"status", "complete"},
+        {"verdict", verdict},
+        {"score", score},
+        {"timestamp", std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count()},
+        {"details", {
+            {"scoreBreakdown", json::object()},
+            {"categories", json::object()},
+            {"mitreTechniques", json::array()},
+            {"behaviorSummary", json::array()},
+            {"detonation", {
+                {"operations", json::array()},
+                {"topOperations", json::array()},
+                {"networkAttemptsDetail", json::array()},
+            }},
+        }},
+    };
+
+    auto& ops = sandbox_result["details"]["detonation"]["operations"];
+    auto& summaries = sandbox_result["details"]["behaviorSummary"];
+    for (const auto& ev : events_arr) {
+        auto cat = safe_str(ev, "category");
+        auto act = safe_str(ev, "action");
+        auto detail = safe_str(ev, "detail");
+        auto path = safe_str(ev, "path");
+        ops.push_back({{"type", cat + "_" + act}, {"path", path.empty() ? detail : path}, {"detail", detail}});
+    }
+    for (const auto& f : findings) {
+        summaries.push_back(f.value("description", ""));
+    }
+
+    stored["_sandbox_result"] = sandbox_result;
+    return stored;
 }
 
 json MessageHandler::handle_submit_sample_to_vm(const json& payload) {
@@ -931,7 +1086,7 @@ json MessageHandler::handle_submit_sample_to_vm(const json& payload) {
         auto prepared_id = prepare_result.value();
 
         std::jthread worker([this, prepared_id, wsb, bridge, config, inetsim,
-                             timeout, wsb_networking, enable_inetsim](std::stop_token stoken) {
+                             timeout, wsb_networking, enable_inetsim, sha256](std::stop_token stoken) {
             // Launch the sandbox with sample already staged.
             VmConfig wsb_config;
             wsb_config.platform = VmPlatform::kWindows;
@@ -1029,113 +1184,70 @@ json MessageHandler::handle_submit_sample_to_vm(const json& payload) {
             fprintf(stderr, "[ShieldTier] Collected %d events from sandbox\n",
                     (int)events_arr.size());
 
-            // Build result.
-            json stored = {
-                {"vm_id", session_id},
-                {"provider", "windows_sandbox"},
-                {"success", true},
-                {"duration_ms", poll_elapsed * 1000.0},
-            };
-
-            stored["events"] = events_arr;
-            stored["event_count"] = events_arr.size();
-
-            // Build findings from events.
-            json findings = json::array();
-            json processes = json::array();
-            json file_ops = json::array();
-            json registry_ops = json::array();
-            int process_count = 0;
-
-            // Safe string extraction (handles null values)
-            auto safe_str = [](const json& j, const char* key) -> std::string {
-                if (!j.contains(key)) return "";
-                auto& v = j[key];
-                if (v.is_null()) return "";
-                if (v.is_string()) return v.get<std::string>();
-                return v.dump();
-            };
-            auto safe_int = [](const json& j, const char* key) -> int {
-                if (!j.contains(key)) return 0;
-                auto& v = j[key];
-                if (v.is_number()) return v.get<int>();
-                return 0;
-            };
-
-            for (const auto& ev : events_arr) {
-                auto cat = safe_str(ev, "category");
-                auto act = safe_str(ev, "action");
-                if (cat == "process" && act == "create") {
-                    process_count++;
-                    processes.push_back({
-                        {"pid", safe_int(ev, "pid")},
-                        {"name", safe_str(ev, "name")},
-                        {"commandLine", safe_str(ev, "path")},
-                    });
-                } else if (cat == "file") {
-                    file_ops.push_back({
-                        {"operation", act},
-                        {"path", safe_str(ev, "path")},
-                    });
-                } else if (cat == "registry") {
-                    registry_ops.push_back({
-                        {"operation", act},
-                        {"key", safe_str(ev, "key")},
-                        {"detail", safe_str(ev, "detail")},
-                    });
-                }
-            }
-
-            // Simple scoring
-            int score = 0;
-            if (process_count > 5) score += 20;
-            if (!file_ops.empty()) score += 15;
-            if (!registry_ops.empty()) score += 25;
-            for (const auto& f : file_ops) {
-                auto p = f.value("path", "");
-                if (p.find("Startup") != std::string::npos) { score += 20; findings.push_back({{"severity","high"},{"category","persistence"},{"description","File dropped in Startup folder: " + p}}); }
-                if (p.find("payload") != std::string::npos) { score += 10; findings.push_back({{"severity","medium"},{"category","file_drop"},{"description","Suspicious file created: " + p}}); }
-                if (p.find("svchost") != std::string::npos) { score += 15; findings.push_back({{"severity","high"},{"category","masquerading"},{"description","File masquerading as system process: " + p}}); }
-            }
-            for (const auto& r : registry_ops) {
-                auto k = r.value("key", "") + r.value("detail", "");
-                if (k.find("Run") != std::string::npos) { score += 25; findings.push_back({{"severity","high"},{"category","persistence"},{"description","Registry Run key modified"}}); }
-                if (k.find("service") != std::string::npos || k.find("Service") != std::string::npos) { score += 15; findings.push_back({{"severity","medium"},{"category","persistence"},{"description","New service installed"}}); }
-            }
-            if (score > 100) score = 100;
-
-            std::string verdict = score >= 70 ? "malicious" : score >= 30 ? "suspicious" : "clean";
-
-            stored["verdict"] = verdict;
-            stored["score"] = score;
-            stored["riskLevel"] = verdict;
-            stored["executionDurationMs"] = poll_elapsed * 1000.0;
-            stored["processTree"] = processes;
-            stored["processCount"] = process_count;
-            stored["fileOperations"] = file_ops;
-            stored["registryOperations"] = registry_ops;
-            stored["findings"] = findings;
-            stored["networkConnections"] = json::array();
-            stored["memoryAllocations"] = json::array();
-            stored["screenshots"] = json::array();
-            stored["mitreTechniques"] = json::array();
-            stored["networkSummary"] = {
-                {"totalConnections", 0},
-                {"uniqueHosts", json::array()},
-                {"uniqueURLs", json::array()},
-                {"dnsQueries", json::array()},
-                {"httpRequests", 0},
-            };
+            // Build results (extracted to static helper to reduce nesting)
+            json stored = build_wsb_result(session_id, events_arr, poll_elapsed);
+            auto verdict = stored.value("verdict", "clean");
+            auto score = stored.value("score", 0);
 
             fprintf(stderr, "[ShieldTier] WSB analysis complete: %d events, score=%d, verdict=%s\n",
                     (int)events_arr.size(), score, verdict.c_str());
 
             // Store result BEFORE pushing to UI (so getResult finds it)
             if (config) {
-                std::string result_key = "vm_result_" + session_id;
-                config->set(result_key, stored);
+                config->set("vm_result_" + session_id, stored);
                 config->save();
-                fprintf(stderr, "[ShieldTier] Saved result to config: %s\n", result_key.c_str());
+            }
+
+            // Push as file analysis update so AnalysisReportPanel picks it up.
+            // The panel reads from staticAnalysis.metadata.detonation.operations
+            // and staticAnalysis.findings.
+            if (bridge && !sha256.empty()) {
+                auto sandbox_result = stored["_sandbox_result"];
+
+                // Build detonation operations in the format AnalysisReportPanel expects
+                json det_operations = json::array();
+                for (const auto& ev : events_arr) {
+                    auto cat = stored.contains("_sandbox_result") ?
+                        (ev.contains("category") && ev["category"].is_string() ? ev["category"].get<std::string>() : "") : "";
+                    auto act = ev.contains("action") && ev["action"].is_string() ? ev["action"].get<std::string>() : "";
+                    auto path = ev.contains("path") && ev["path"].is_string() ? ev["path"].get<std::string>() : "";
+                    auto detail = ev.contains("detail") && ev["detail"].is_string() ? ev["detail"].get<std::string>() : "";
+                    auto name = ev.contains("name") && ev["name"].is_string() ? ev["name"].get<std::string>() : "";
+
+                    std::string op_type;
+                    if (cat == "process") op_type = "process_create";
+                    else if (cat == "file") op_type = "file_" + act;
+                    else if (cat == "registry") op_type = "registry_" + act;
+                    else if (cat == "network") op_type = "network_" + act;
+                    else op_type = cat + "_" + act;
+
+                    det_operations.push_back({
+                        {"type", op_type},
+                        {"target", path.empty() ? detail : path},
+                        {"data", detail.empty() ? name : detail},
+                    });
+                }
+
+                json file_update = {
+                    {"sha256", sha256},
+                    {"id", sha256},
+                    {"sandboxResults", json::array({sandbox_result})},
+                    {"behavioralAnalysisDone", true},
+                    {"behavioralAnalysisRunning", false},
+                    {"staticAnalysis", {
+                        {"findings", stored["findings"]},
+                        {"metadata", {
+                            {"detonation", {
+                                {"operations", det_operations},
+                                {"operationCount", det_operations.size()},
+                                {"topOperations", json::array()},
+                                {"networkAttemptsDetail", json::array()},
+                                {"networkTraffic", json::array()},
+                            }},
+                        }},
+                    }},
+                };
+                bridge->push_analysis_complete(sha256, file_update);
             }
 
             if (bridge) {
