@@ -56,6 +56,8 @@ set(SHIELDTIER_SOURCES
     vm/vm_protocol.cpp
     vm/vm_scoring.cpp
     vm/vm_installer.cpp
+    vm/windows_sandbox.cpp
+    vm/rdp_client.cpp
     security/anti_debug.cpp
     security/integrity_guard.cpp
     security/encrypted_pages.cpp

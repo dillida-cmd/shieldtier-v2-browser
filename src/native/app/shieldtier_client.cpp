@@ -2,7 +2,6 @@
 
 #include <chrono>
 #include <ctime>
-#include <sstream>
 
 #include "include/cef_app.h"
 #include "browser/navigation.h"
@@ -10,9 +9,14 @@
 
 #if defined(OS_MAC) || defined(OS_MACOS)
 #include "app/app_mac.h"
-#elif defined(_WIN32)
+#endif
+
+#if defined(_WIN32)
 #include <windows.h>
 #include <commdlg.h>
+#include <shlobj.h>
+#pragma comment(lib, "comdlg32.lib")
+#pragma comment(lib, "shell32.lib")
 #endif
 
 ShieldTierClient::ShieldTierClient(const std::string& root_cache_path)
@@ -117,6 +121,20 @@ bool ShieldTierClient::OnProcessMessageReceived(
 void ShieldTierClient::create_content_browser() {
     if (content_client_) return;
 
+#if defined(OS_MAC) || defined(OS_MACOS)
+    void* parent_view = shieldtier_mac_get_content_view();
+    if (!parent_view) {
+        fprintf(stderr, "[ShieldTier] create_content_browser: no parent view\n");
+        return;
+    }
+
+    // Create an NSView to host the content browser
+    // We use Objective-C runtime from C++ via the extern "C" helpers
+    // Actually we can create the view using Cocoa from the .mm helpers — but
+    // for simplicity we'll create it inline via the ObjC bridging in app_mac
+    // For now, we'll set the content browser as a child of the main content view
+    // with initial 1x1 size (will be resized by set_content_bounds)
+
     std::string pending_url = pending_content_url_;
     pending_content_url_.clear();
 
@@ -126,10 +144,12 @@ void ShieldTierClient::create_content_browser() {
         [this, pending_url]() {
             if (content_client_ && content_client_->browser()) {
                 auto host = content_client_->browser()->GetHost();
-#if defined(OS_MAC) || defined(OS_MACOS)
                 void* view = host->GetWindowHandle();
                 if (view) {
+                    // Disable autoresizing — frame is managed by set_content_bounds
                     shieldtier_mac_set_view_fixed(view);
+
+                    // Apply pending bounds if setBounds was called before browser was ready
                     if (has_pending_bounds_) {
                         shieldtier_mac_set_view_frame(view, pending_x_, pending_y_,
                                                        pending_w_, pending_h_);
@@ -138,26 +158,13 @@ void ShieldTierClient::create_content_browser() {
                         fprintf(stderr, "[ShieldTier] Applied pending bounds: %dx%d+%d+%d\n",
                                 pending_w_, pending_h_, pending_x_, pending_y_);
                     } else {
+                        // No pending bounds yet — start hidden at 1x1 until React calls setBounds
                         shieldtier_mac_set_view_hidden(view, true);
                     }
                 }
-#elif defined(_WIN32)
-                HWND hwnd = host->GetWindowHandle();
-                if (hwnd) {
-                    if (has_pending_bounds_) {
-                        SetWindowPos(hwnd, HWND_TOP, pending_x_, pending_y_,
-                                     pending_w_, pending_h_, SWP_SHOWWINDOW);
-                        host->WasResized();
-                        has_pending_bounds_ = false;
-                        fprintf(stderr, "[ShieldTier] Applied pending bounds: %dx%d+%d+%d\n",
-                                pending_w_, pending_h_, pending_x_, pending_y_);
-                    } else {
-                        ShowWindow(hwnd, SW_HIDE);
-                    }
-                }
-#endif
             }
 
+            // Navigate to pending URL
             if (!pending_url.empty() && content_client_ && content_client_->browser()) {
                 shieldtier::Navigation::load_url(content_client_->browser(), pending_url);
                 show_content_browser();
@@ -167,38 +174,7 @@ void ShieldTierClient::create_content_browser() {
 
     CefWindowInfo window_info;
     window_info.runtime_style = CEF_RUNTIME_STYLE_ALLOY;
-
-#if defined(OS_MAC) || defined(OS_MACOS)
-    void* parent_view = shieldtier_mac_get_content_view();
-    if (!parent_view) {
-        fprintf(stderr, "[ShieldTier] create_content_browser: no parent view\n");
-        content_client_ = nullptr;
-        return;
-    }
     window_info.SetAsChild(parent_view, CefRect(0, 0, 1, 1));
-#elif defined(_WIN32)
-    // On Windows, the UI browser's GetWindowHandle() returns the top-level
-    // popup.  We need to find the actual Chrome widget inside it to use as
-    // parent, so the content browser renders on top of the React UI.
-    HWND popup_hwnd = nullptr;
-    if (browser_) {
-        popup_hwnd = browser_->GetHost()->GetWindowHandle();
-    }
-    if (!popup_hwnd) {
-        fprintf(stderr, "[ShieldTier] create_content_browser: no parent HWND\n");
-        content_client_ = nullptr;
-        return;
-    }
-    // Use the popup itself as parent — the content browser child will
-    // be positioned on top via SetWindowPos with HWND_TOP in set_content_bounds.
-    fprintf(stderr, "[ShieldTier] create_content_browser: parent HWND=%p\n",
-            static_cast<void*>(popup_hwnd));
-    window_info.SetAsChild(popup_hwnd, CefRect(0, 0, 1, 1));
-#else
-    fprintf(stderr, "[ShieldTier] create_content_browser: unsupported platform\n");
-    content_client_ = nullptr;
-    return;
-#endif
 
     CefBrowserSettings browser_settings;
     browser_settings.default_font_size = 14;
@@ -210,9 +186,56 @@ void ShieldTierClient::create_content_browser() {
                                    "about:blank", browser_settings,
                                    nullptr, context);
     fprintf(stderr, "[ShieldTier] Content browser creation initiated\n");
+
+#elif defined(_WIN32)
+    // Windows: create content browser as child of the main window
+    std::string pending_url = pending_content_url_;
+    pending_content_url_.clear();
+
+    content_client_ = new ContentBrowserClient(
+        request_handler_, download_handler_,
+        event_bridge_.get(), session_manager_.get(),
+        [this, pending_url]() {
+            if (!pending_url.empty() && content_client_ && content_client_->browser()) {
+                shieldtier::Navigation::load_url(content_client_->browser(), pending_url);
+            }
+            enable_content_network_tracking();
+        });
+
+    CefWindowInfo window_info;
+    window_info.runtime_style = CEF_RUNTIME_STYLE_ALLOY;
+
+    // Find the main HWND
+    HWND main_hwnd = nullptr;
+    auto browser_list = CefBrowserHost::GetBrowserByIdentifier(0);
+    // Use the first browser's parent window, or fall back to desktop
+    if (browser_ && browser_->GetHost()) {
+        main_hwnd = browser_->GetHost()->GetWindowHandle();
+    }
+    if (main_hwnd) {
+        RECT rc;
+        GetClientRect(main_hwnd, &rc);
+        window_info.SetAsChild(main_hwnd, CefRect(0, 0, 1, 1));
+    } else {
+        window_info.SetAsPopup(nullptr, "ShieldTier Content");
+    }
+
+    CefBrowserSettings browser_settings;
+    browser_settings.default_font_size = 14;
+    browser_settings.minimum_font_size = 9;
+    CefRefPtr<CefRequestContext> context =
+        CefRequestContext::GetGlobalContext();
+
+    CefBrowserHost::CreateBrowser(window_info, content_client_,
+                                   "about:blank", browser_settings,
+                                   nullptr, context);
+    fprintf(stderr, "[ShieldTier] Content browser creation initiated (Windows)\n");
+#endif
 }
 
 void ShieldTierClient::set_content_bounds(int x, int y, int w, int h) {
+#if defined(OS_MAC) || defined(OS_MACOS)
+    // Store bounds — if browser isn't ready yet, apply them in the on-ready callback
     pending_x_ = x;
     pending_y_ = y;
     pending_w_ = w;
@@ -222,8 +245,6 @@ void ShieldTierClient::set_content_bounds(int x, int y, int w, int h) {
     if (!content_client_ || !content_client_->browser()) return;
 
     auto host = content_client_->browser()->GetHost();
-
-#if defined(OS_MAC) || defined(OS_MACOS)
     void* view = host->GetWindowHandle();
     if (view) {
         shieldtier_mac_set_view_frame(view, x, y, w, h);
@@ -233,60 +254,58 @@ void ShieldTierClient::set_content_bounds(int x, int y, int w, int h) {
         has_pending_bounds_ = false;
     }
 #elif defined(_WIN32)
+    pending_x_ = x;
+    pending_y_ = y;
+    pending_w_ = w;
+    pending_h_ = h;
+    has_pending_bounds_ = true;
+
+    if (!content_client_ || !content_client_->browser()) return;
+
+    auto host = content_client_->browser()->GetHost();
     HWND hwnd = host->GetWindowHandle();
     if (hwnd) {
-        // Apply DPI scaling: getBoundingClientRect returns CSS pixels,
-        // but SetWindowPos needs device pixels on high-DPI displays.
-        HWND parent = GetParent(hwnd);
-        float scale = 1.0f;
-        if (parent) {
-            UINT dpi = GetDpiForWindow(parent);
-            if (dpi > 0) scale = static_cast<float>(dpi) / 96.0f;
-        }
-        int px = static_cast<int>(x * scale);
-        int py = static_cast<int>(y * scale);
-        int pw = static_cast<int>(w * scale);
-        int ph = static_cast<int>(h * scale);
-
-        SetWindowPos(hwnd, HWND_TOP, px, py, pw, ph, SWP_SHOWWINDOW);
+        SetWindowPos(hwnd, nullptr, x, y, w, h, SWP_NOZORDER | SWP_SHOWWINDOW);
         host->NotifyMoveOrResizeStarted();
         host->WasResized();
         has_pending_bounds_ = false;
-        fprintf(stderr, "[ShieldTier] set_content_bounds: HWND=%p at %d,%d %dx%d (scale=%.2f)\n",
-                static_cast<void*>(hwnd), px, py, pw, ph, scale);
     }
 #endif
 }
 
 void ShieldTierClient::show_content_browser() {
+#if defined(OS_MAC) || defined(OS_MACOS)
     if (!content_client_ || !content_client_->browser()) return;
 
     auto host = content_client_->browser()->GetHost();
-#if defined(OS_MAC) || defined(OS_MACOS)
     void* view = host->GetWindowHandle();
     if (view) shieldtier_mac_set_view_hidden(view, false);
 #elif defined(_WIN32)
+    if (!content_client_ || !content_client_->browser()) return;
+
+    auto host = content_client_->browser()->GetHost();
     HWND hwnd = host->GetWindowHandle();
     if (hwnd) ShowWindow(hwnd, SW_SHOW);
 #endif
 }
 
 void ShieldTierClient::hide_content_browser() {
+#if defined(OS_MAC) || defined(OS_MACOS)
     if (!content_client_ || !content_client_->browser()) return;
 
     auto host = content_client_->browser()->GetHost();
-#if defined(OS_MAC) || defined(OS_MACOS)
     void* view = host->GetWindowHandle();
     if (view) shieldtier_mac_set_view_hidden(view, true);
 #elif defined(_WIN32)
+    if (!content_client_ || !content_client_->browser()) return;
+
+    auto host = content_client_->browser()->GetHost();
     HWND hwnd = host->GetWindowHandle();
     if (hwnd) ShowWindow(hwnd, SW_HIDE);
 #endif
 }
 
 void ShieldTierClient::navigate_content(const std::string& url) {
-    fprintf(stderr, "[ShieldTier] navigate_content: url=%s content_client=%p\n",
-            url.c_str(), static_cast<void*>(content_client_.get()));
     if (content_client_ && content_client_->browser()) {
         shieldtier::Navigation::load_url(content_client_->browser(), url);
         show_content_browser();
@@ -495,41 +514,43 @@ std::string ShieldTierClient::open_file_dialog(const std::string& title,
         return result;
     }
 #elif defined(_WIN32)
-    OPENFILENAMEA ofn = {};
-    char file_buf[MAX_PATH] = {};
-
-    // Build filter string from file_types (e.g. ".eml,.msg" → "Supported Files\0*.eml;*.msg\0All Files\0*.*\0")
-    std::string filter;
-    if (!file_types.empty()) {
-        filter = "Supported Files";
-        filter.push_back('\0');
-        // Convert ".eml,.msg" to "*.eml;*.msg"
-        std::string exts;
-        std::istringstream ss(file_types);
-        std::string tok;
-        while (std::getline(ss, tok, ',')) {
-            if (!exts.empty()) exts += ";";
-            if (!tok.empty() && tok[0] == '.') exts += "*";
-            exts += tok;
-        }
-        filter += exts;
-        filter.push_back('\0');
+    // Build filter string from comma-separated extensions
+    // e.g. "log,csv,json" → "Log Files\0*.log;*.csv;*.json\0All Files\0*.*\0\0"
+    std::string filter_display = "Supported Files";
+    std::string filter_pattern;
+    std::string types = file_types;
+    size_t pos = 0;
+    while (pos < types.size()) {
+        auto comma = types.find(',', pos);
+        std::string ext = (comma == std::string::npos) ? types.substr(pos) : types.substr(pos, comma - pos);
+        if (!filter_pattern.empty()) filter_pattern += ";";
+        filter_pattern += "*." + ext;
+        pos = (comma == std::string::npos) ? types.size() : comma + 1;
     }
+
+    // Build double-null-terminated filter
+    std::string filter = filter_display;
+    filter.push_back('\0');
+    filter += filter_pattern;
+    filter.push_back('\0');
     filter += "All Files";
     filter.push_back('\0');
     filter += "*.*";
     filter.push_back('\0');
+    filter.push_back('\0');
 
+    char filename[MAX_PATH] = {0};
+    OPENFILENAMEA ofn = {};
     ofn.lStructSize = sizeof(ofn);
-    ofn.hwndOwner = browser_ ? browser_->GetHost()->GetWindowHandle() : nullptr;
+    ofn.hwndOwner = nullptr;
     ofn.lpstrFilter = filter.c_str();
-    ofn.lpstrFile = file_buf;
+    ofn.lpstrFile = filename;
     ofn.nMaxFile = MAX_PATH;
     ofn.lpstrTitle = title.c_str();
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
 
     if (GetOpenFileNameA(&ofn)) {
-        return std::string(file_buf);
+        return std::string(filename);
     }
 #endif
     return "";
@@ -547,42 +568,31 @@ std::string ShieldTierClient::save_file_dialog(const std::string& title,
         return result;
     }
 #elif defined(_WIN32)
-    OPENFILENAMEA ofn = {};
-    char file_buf[MAX_PATH] = {};
-
-    // Pre-fill with default name
-    if (!default_name.empty()) {
-        strncpy_s(file_buf, default_name.c_str(), MAX_PATH - 1);
-    }
-
-    std::string filter;
-    if (!extension.empty()) {
-        std::string ext_upper = extension;
-        for (auto& c : ext_upper) c = static_cast<char>(toupper(static_cast<unsigned char>(c)));
-        filter = ext_upper + " Files";
-        filter.push_back('\0');
-        filter += "*." + extension;
-        filter.push_back('\0');
-    }
+    std::string filter = extension + " Files";
+    filter.push_back('\0');
+    filter += "*." + extension;
+    filter.push_back('\0');
     filter += "All Files";
     filter.push_back('\0');
     filter += "*.*";
     filter.push_back('\0');
+    filter.push_back('\0');
 
+    char filename[MAX_PATH] = {0};
+    strncpy(filename, default_name.c_str(), MAX_PATH - 1);
+
+    OPENFILENAMEA ofn = {};
     ofn.lStructSize = sizeof(ofn);
-    ofn.hwndOwner = browser_ ? browser_->GetHost()->GetWindowHandle() : nullptr;
+    ofn.hwndOwner = nullptr;
     ofn.lpstrFilter = filter.c_str();
-    ofn.lpstrFile = file_buf;
+    ofn.lpstrFile = filename;
     ofn.nMaxFile = MAX_PATH;
     ofn.lpstrTitle = title.c_str();
+    ofn.lpstrDefExt = extension.c_str();
     ofn.Flags = OFN_OVERWRITEPROMPT | OFN_NOCHANGEDIR;
 
-    if (!extension.empty()) {
-        ofn.lpstrDefExt = extension.c_str();
-    }
-
     if (GetSaveFileNameA(&ofn)) {
-        return std::string(file_buf);
+        return std::string(filename);
     }
 #endif
     return "";

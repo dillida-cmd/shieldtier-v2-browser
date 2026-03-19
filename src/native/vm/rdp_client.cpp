@@ -494,7 +494,13 @@ void RdpClient::resize(int x, int y, int w, int h) {
 #endif
 }
 
-bool RdpClient::is_connected() const { return connected_.load(); }
+bool RdpClient::is_connected() const {
+#ifdef _WIN32
+    return connected_.load();
+#else
+    return false;
+#endif
+}
 
 void RdpClient::destroy() {
 #ifdef _WIN32
