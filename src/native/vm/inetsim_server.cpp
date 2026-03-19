@@ -6,7 +6,9 @@
 #ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <iphlpapi.h>
 #pragma comment(lib, "ws2_32.lib")
+#pragma comment(lib, "iphlpapi.lib")
 using socket_t = SOCKET;
 constexpr socket_t kInvalidSocket = INVALID_SOCKET;
 #else
@@ -206,6 +208,81 @@ void init_winsock() {
         WSAStartup(MAKEWORD(2, 2), &wsa);
     });
 }
+
+// Auto-detect the host IP that Windows Sandbox can reach.
+// Sandbox uses a Hyper-V NAT — the host's IP on the virtual switch
+// is the gateway from the sandbox's perspective.
+// We look for adapters containing "vEthernet" or IPs in 172.x.x.x range,
+// falling back to the first non-loopback IPv4 address.
+std::string detect_host_ip_for_sandbox() {
+    init_winsock();
+
+    std::string best_ip;
+    std::string fallback_ip;
+
+    ULONG buf_len = 15000;
+    auto* addrs = static_cast<IP_ADAPTER_ADDRESSES*>(malloc(buf_len));
+    if (!addrs) return "10.0.0.1";
+
+    ULONG ret = GetAdaptersAddresses(AF_INET,
+        GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER,
+        nullptr, addrs, &buf_len);
+    if (ret == ERROR_BUFFER_OVERFLOW) {
+        free(addrs);
+        addrs = static_cast<IP_ADAPTER_ADDRESSES*>(malloc(buf_len));
+        if (!addrs) return "10.0.0.1";
+        ret = GetAdaptersAddresses(AF_INET,
+            GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER,
+            nullptr, addrs, &buf_len);
+    }
+
+    if (ret == NO_ERROR) {
+        for (auto* adapter = addrs; adapter; adapter = adapter->Next) {
+            if (adapter->OperStatus != IfOperStatusUp) continue;
+
+            // Check adapter name for Hyper-V virtual switch
+            std::wstring name(adapter->FriendlyName);
+            bool is_virtual = (name.find(L"vEthernet") != std::wstring::npos ||
+                               name.find(L"Hyper-V") != std::wstring::npos);
+
+            for (auto* ua = adapter->FirstUnicastAddress; ua; ua = ua->Next) {
+                auto* sa = reinterpret_cast<sockaddr_in*>(ua->Address.lpSockaddr);
+                if (sa->sin_family != AF_INET) continue;
+
+                char ip_str[INET_ADDRSTRLEN] = {};
+                inet_ntop(AF_INET, &sa->sin_addr, ip_str, sizeof(ip_str));
+                std::string ip(ip_str);
+
+                if (ip == "127.0.0.1" || ip == "0.0.0.0") continue;
+
+                // Prefer virtual switch adapters
+                if (is_virtual) {
+                    best_ip = ip;
+                    break;
+                }
+
+                // Prefer 172.x.x.x (common Hyper-V NAT range)
+                if (ip.compare(0, 4, "172.") == 0 && best_ip.empty()) {
+                    best_ip = ip;
+                }
+
+                // Keep first non-loopback as fallback
+                if (fallback_ip.empty()) {
+                    fallback_ip = ip;
+                }
+            }
+            if (!best_ip.empty() && is_virtual) break;
+        }
+    }
+
+    free(addrs);
+
+    std::string result = best_ip.empty() ? fallback_ip : best_ip;
+    if (result.empty()) result = "10.0.0.1";
+
+    fprintf(stderr, "[INetSim] Auto-detected host IP for sandbox: %s\n", result.c_str());
+    return result;
+}
 #endif
 
 }  // namespace
@@ -223,7 +300,17 @@ Result<bool> INetSimServer::start() {
 
 #ifdef _WIN32
     init_winsock();
+
+    // Auto-detect the host IP that the sandbox will see as its gateway.
+    if (config_.fake_dns_ip.empty()) {
+        config_.fake_dns_ip = detect_host_ip_for_sandbox();
+    }
 #endif
+
+    fprintf(stderr, "[INetSim] Starting: DNS=%s:%d HTTP=%s:%d fake_ip=%s\n",
+            config_.bind_address.c_str(), config_.dns_port,
+            config_.bind_address.c_str(), config_.http_port,
+            config_.fake_dns_ip.c_str());
 
     running_.store(true);
 

@@ -35,6 +35,8 @@
 #include "scoring/scoring_engine.h"
 #include "vm/vm_manager.h"
 #include "vm/vm_installer.h"
+#include "vm/inetsim_server.h"
+#include "vm/windows_sandbox.h"
 
 class ShieldTierClient;
 
@@ -174,6 +176,7 @@ private:
 
     // VM
     json handle_vm_get_status(const json& payload);
+    json handle_wsb_focus_window(const json& payload);
     json handle_vm_install(const json& payload);
     json handle_vm_list_images(const json& payload);
     json handle_vm_download_image(const json& payload);
@@ -255,6 +258,9 @@ private:
     std::unique_ptr<ExportManager> export_manager_;
     std::unique_ptr<VmManager> vm_manager_;
     std::unique_ptr<VmInstaller> vm_installer_;
+    std::unique_ptr<WindowsSandbox> windows_sandbox_;
+    std::unique_ptr<INetSimServer> inetsim_server_;
+    std::string active_wsb_session_;  // active Windows Sandbox session id
     std::unique_ptr<ChatManager> chat_manager_;
     std::unique_ptr<CloudSandboxManager> cloud_sandbox_;
     HarBuilder har_builder_;

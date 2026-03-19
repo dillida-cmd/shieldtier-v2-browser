@@ -11,11 +11,11 @@
 namespace shieldtier {
 
 struct INetSimConfig {
-    int dns_port = 5553;
-    int http_port = 8080;
-    int https_port = 8443;
-    std::string bind_address = "127.0.0.1";
-    std::string fake_dns_ip = "10.0.0.1";
+    int dns_port = 53;       // standard DNS — sandbox DNS client requires this
+    int http_port = 80;      // standard HTTP — malware connects to port 80
+    int https_port = 443;    // standard HTTPS
+    std::string bind_address = "0.0.0.0";  // all interfaces — sandbox reaches host via gateway
+    std::string fake_dns_ip = "";  // empty = auto-detect host IP visible to sandbox
 };
 
 struct NetworkEvent {

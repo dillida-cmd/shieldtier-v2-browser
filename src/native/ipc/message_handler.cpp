@@ -21,6 +21,7 @@
 #include "chat/shieldcrypt.h"
 #include "config/paths.h"
 #include "vm/vm_scoring.h"
+#include "vm/windows_sandbox.h"
 
 namespace shieldtier {
 
@@ -65,6 +66,8 @@ MessageHandler::MessageHandler(SessionManager* session_manager)
       vm_installer_(std::make_unique<VmInstaller>(paths::get_data_path() + "/vms")),
       chat_manager_(std::make_unique<ChatManager>(paths::get_data_path() + "/chat")),
       cloud_sandbox_(std::make_unique<CloudSandboxManager>(CloudSandboxConfig{})),
+      windows_sandbox_(std::make_unique<WindowsSandbox>(paths::get_data_path() + "/wsb_sessions")),
+      inetsim_server_(std::make_unique<INetSimServer>()),
       auth_http_(std::make_unique<HttpClient>()) {
     chat_manager_->initialize_keys();
     yara_engine_->initialize();
@@ -75,9 +78,19 @@ MessageHandler::MessageHandler(SessionManager* session_manager)
 }
 
 MessageHandler::~MessageHandler() {
-    // jthread destructor requests stop and joins automatically.
-    std::lock_guard<std::mutex> lock(threads_mutex_);
-    analysis_threads_.clear();
+    // Join worker threads FIRST so they can read results before cleanup.
+    {
+        std::lock_guard<std::mutex> lock(threads_mutex_);
+        analysis_threads_.clear();  // jthread destructor requests stop and joins
+    }
+
+    // NOW stop Windows Sandbox (kills processes + cleans up session dir).
+    if (!active_wsb_session_.empty() && windows_sandbox_) {
+        fprintf(stderr, "[ShieldTier] Shutting down active sandbox session: %s\n",
+                active_wsb_session_.c_str());
+        windows_sandbox_->stop(active_wsb_session_);
+        active_wsb_session_.clear();
+    }
 }
 
 bool MessageHandler::OnQuery(CefRefPtr<CefBrowser> browser,
@@ -97,6 +110,14 @@ bool MessageHandler::OnQuery(CefRefPtr<CefBrowser> browser,
 
     try {
         auto req = ipc::parse_request(request.ToString());
+        fprintf(stderr, "[ShieldTier] IPC: action=%s\n", req.action.c_str());
+
+        // Handle simple actions before the long else-if chain to avoid
+        // MSVC C1061 "blocks nested too deeply" compiler limit.
+        if (req.action == ipc::kActionWsbFocusWindow) {
+            callback->Success(handle_wsb_focus_window(req.payload).dump());
+            return true;
+        }
 
         json result;
         if (req.action == ipc::kActionNavigate) {
@@ -681,7 +702,63 @@ json MessageHandler::handle_start_vm(const json& payload) {
     } else {
         config.platform = VmPlatform::kLinux;
     }
+    config.enable_network = payload.value("enable_network", true);
 
+    // Prefer Windows Sandbox when available (faster, no QEMU dependency).
+    if (WindowsSandbox::is_available()) {
+        if (event_bridge_) {
+            event_bridge_->push_vm_status("booting");
+        }
+
+        auto* wsb = windows_sandbox_.get();
+        auto* bridge = event_bridge_;
+
+        std::jthread launcher([this, config, wsb, bridge](std::stop_token) {
+            auto result = wsb->launch(config);
+            if (result.ok()) {
+                auto sid = result.value();
+                {
+                    std::lock_guard<std::mutex> lock(threads_mutex_);
+                    active_wsb_session_ = sid;
+                }
+                if (bridge) bridge->push_vm_status("running");
+
+#ifdef _WIN32
+                // Connect RDP client to sandbox.
+                std::this_thread::sleep_for(std::chrono::seconds(5));
+                HWND st_hwnd = FindWindowA(nullptr, "ShieldTier");
+                if (st_hwnd) {
+                    RECT rc = {};
+                    GetClientRect(st_hwnd, &rc);
+                    int sidebar_w = 200;
+                    int toolbar_h = 90;
+                    auto rdp_result = wsb->connect_rdp(
+                        sid, st_hwnd,
+                        sidebar_w, toolbar_h,
+                        rc.right - sidebar_w,
+                        rc.bottom - toolbar_h);
+                    if (rdp_result.ok()) {
+                        if (bridge) bridge->push("wsb_embedded", {{"session_id", sid}});
+                    } else {
+                        fprintf(stderr, "[ShieldTier] RDP embed failed: %s\n",
+                                rdp_result.error().message.c_str());
+                    }
+                }
+#endif
+            } else {
+                if (bridge) bridge->push_vm_status("error");
+            }
+        });
+
+        {
+            std::lock_guard<std::mutex> lock(threads_mutex_);
+            analysis_threads_.push_back(std::move(launcher));
+        }
+
+        return ipc::make_success({{"vm_id", "wsb_pending"}, {"provider", "windows_sandbox"}});
+    }
+
+    // Fallback to QEMU.
     auto result = vm_manager_->create_vm(config);
     if (!result.ok()) {
         return ipc::make_error(result.error().message);
@@ -725,12 +802,35 @@ json MessageHandler::handle_start_vm(const json& payload) {
         analysis_threads_.push_back(std::move(monitor));
     }
 
-    return ipc::make_success({{"vm_id", vm_id}});
+    return ipc::make_success({{"vm_id", vm_id}, {"provider", "qemu"}});
 }
 
 json MessageHandler::handle_stop_vm(const json& payload) {
     std::string vm_id = payload.value("vm_id", "");
 
+    // Try stopping a Windows Sandbox session first.
+    std::string wsb_session;
+    {
+        std::lock_guard<std::mutex> lock(threads_mutex_);
+        wsb_session = active_wsb_session_;
+    }
+
+    if (!wsb_session.empty() && (vm_id.empty() || vm_id == wsb_session)) {
+        auto result = windows_sandbox_->stop(wsb_session);
+        {
+            std::lock_guard<std::mutex> lock(threads_mutex_);
+            active_wsb_session_.clear();
+        }
+        if (event_bridge_) {
+            event_bridge_->push_vm_status("idle");
+        }
+        if (!result.ok()) {
+            return ipc::make_error(result.error().message);
+        }
+        return ipc::make_success();
+    }
+
+    // Fallback: QEMU path.
     if (vm_id.empty()) {
         auto vms = vm_manager_->list_vms();
         if (!vms.empty()) {
@@ -754,8 +854,25 @@ json MessageHandler::handle_stop_vm(const json& payload) {
     return ipc::make_success();
 }
 
+json MessageHandler::handle_wsb_focus_window(const json& /*payload*/) {
+#ifdef _WIN32
+    HWND sbx = FindWindowA(nullptr, "Windows Sandbox");
+    if (sbx) {
+        if (IsIconic(sbx)) ShowWindow(sbx, SW_RESTORE);
+        SetForegroundWindow(sbx);
+        return ipc::make_success({{"focused", true}});
+    }
+    return ipc::make_error("sandbox_window_not_found");
+#else
+    return ipc::make_error("windows_only");
+#endif
+}
+
 json MessageHandler::handle_submit_sample_to_vm(const json& payload) {
     std::string sha256 = payload.value("sha256", "");
+    if (sha256.empty()) {
+        sha256 = payload.value("fileId", "");
+    }
     if (sha256.empty()) {
         return ipc::make_error("sha256_required");
     }
@@ -765,6 +882,277 @@ json MessageHandler::handle_submit_sample_to_vm(const json& payload) {
         return ipc::make_error("download_not_found");
     }
 
+    // Check if Windows Sandbox is available — run everything on a background thread.
+    std::string wsb_session;
+    {
+        std::lock_guard<std::mutex> lock(threads_mutex_);
+        wsb_session = active_wsb_session_;
+    }
+
+    if (WindowsSandbox::is_available()) {
+        if (event_bridge_) {
+            event_bridge_->push_vm_status("booting");
+        }
+
+        auto file_copy = file_opt.value();
+        auto* wsb = windows_sandbox_.get();
+        auto* bridge = event_bridge_;
+        auto* config = config_store_.get();
+        auto* inetsim = inetsim_server_.get();
+        int timeout = payload.value("timeout", 300);
+        bool enable_net = payload.contains("config")
+            ? payload["config"].value("enableNetwork", false) : false;
+        bool enable_inetsim = payload.contains("config")
+            ? payload["config"].value("enableINetSim", true) : true;
+
+        // INet (Fake) mode: disable networking entirely at the Hyper-V level.
+        // Windows Sandbox ignores guest-OS firewall rules, so the only reliable
+        // way to block real internet is <Networking>Disable</Networking>.
+        // Mapped folders (C:\Samples, C:\Results) still work via VMBus.
+        // Internet (Real) mode: enable networking for live analysis.
+        bool wsb_networking = !enable_inetsim;
+
+        // INetSim not needed — INet (Fake) mode uses <Networking>Disable</Networking>
+        // which blocks all TCP/IP at the Hyper-V level.
+
+        // Stage sample BEFORE launching sandbox so the agent finds it at boot.
+        std::string net_mode = enable_inetsim ? "inetsim" : "internet";
+        auto prepare_result = wsb->prepare_session(file_copy, wsb_networking, net_mode);
+        if (!prepare_result.ok()) {
+            if (bridge) {
+                bridge->push_vm_status("error");
+                bridge->push("vm_result", {
+                    {"success", false},
+                    {"error", prepare_result.error().message},
+                });
+            }
+            return ipc::make_error(prepare_result.error().message);
+        }
+        auto prepared_id = prepare_result.value();
+
+        std::jthread worker([this, prepared_id, wsb, bridge, config, inetsim,
+                             timeout, wsb_networking, enable_inetsim](std::stop_token stoken) {
+            // Launch the sandbox with sample already staged.
+            VmConfig wsb_config;
+            wsb_config.platform = VmPlatform::kWindows;
+            wsb_config.enable_network = wsb_networking;
+            wsb_config.enable_inetsim = enable_inetsim;
+
+            auto launch_result = wsb->launch(prepared_id, wsb_config);
+            if (!launch_result.ok()) {
+                if (bridge) {
+                    bridge->push_vm_status("error");
+                    bridge->push("vm_result", {
+                        {"success", false},
+                        {"error", launch_result.error().message},
+                    });
+                }
+                return;
+            }
+
+            std::string session_id = launch_result.value();
+            {
+                std::lock_guard<std::mutex> lock(threads_mutex_);
+                active_wsb_session_ = session_id;
+            }
+
+            // Sandbox is booting — the standalone Windows Sandbox window
+            // is visible.  Tell the UI so it can show "Switch to VM Window".
+            if (bridge) {
+                bridge->push_vm_status("running");
+                bridge->push("wsb_running", {
+                    {"session_id", session_id},
+                    {"provider", "windows_sandbox"},
+                });
+            }
+            fprintf(stderr, "[ShieldTier] Sandbox launched, user can switch to VM window\n");
+
+            // Get results dir NOW while session is alive.
+            std::string results_dir = wsb->get_results_dir(session_id);
+            for (auto& c : results_dir) { if (c == '/') c = '\\'; }
+            auto events_path = results_dir + "\\events.jsonl";
+
+            // Wait for WindowsSandboxServer.exe to start (takes 5-15 seconds)
+            if (bridge) bridge->push_vm_status("booting");
+            for (int wait = 0; wait < 30 && !stoken.stop_requested(); ++wait) {
+                if (wsb->is_running(session_id)) break;
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+            }
+            fprintf(stderr, "[ShieldTier] Sandbox server running: %s\n",
+                    wsb->is_running(session_id) ? "yes" : "no");
+
+            // Poll every second. Continuously read events while sandbox runs.
+            // We must read BEFORE sandbox stops because mapped folders
+            // disappear when the VM shuts down.
+            if (bridge) bridge->push_vm_status("executing");
+            json events_arr = json::array();
+            int poll_elapsed = 0;
+            while (poll_elapsed < timeout &&
+                   (wsb->is_running(session_id) || poll_elapsed < 30) &&
+                   !stoken.stop_requested()) {
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+                poll_elapsed += 1;
+
+                // Read events on every poll (file may grow as agent collects)
+                json latest_events = json::array();
+                {
+                    std::ifstream evf(events_path);
+                    if (evf.is_open()) {
+                        std::string line;
+                        while (std::getline(evf, line)) {
+                            if (line.empty()) continue;
+                            if (!line.empty() && line.back() == '\r') line.pop_back();
+                            if (line.empty()) continue;
+                            if (line.size() >= 3 &&
+                                static_cast<unsigned char>(line[0]) == 0xEF &&
+                                static_cast<unsigned char>(line[1]) == 0xBB &&
+                                static_cast<unsigned char>(line[2]) == 0xBF) {
+                                line = line.substr(3);
+                            }
+                            try { latest_events.push_back(json::parse(line)); } catch (...) {}
+                        }
+                    }
+                }
+                if (latest_events.size() > events_arr.size()) {
+                    events_arr = std::move(latest_events);
+                    // Push live event count to UI
+                    if (bridge) {
+                        bridge->push("vm_status", {
+                            {"status", "executing"},
+                            {"progress", std::to_string(events_arr.size()) + " events collected"},
+                        });
+                    }
+                }
+            }
+
+            if (bridge) bridge->push_vm_status("collecting");
+            fprintf(stderr, "[ShieldTier] Collected %d events from sandbox\n",
+                    (int)events_arr.size());
+
+            // Build result.
+            json stored = {
+                {"vm_id", session_id},
+                {"provider", "windows_sandbox"},
+                {"success", true},
+                {"duration_ms", poll_elapsed * 1000.0},
+            };
+
+            stored["events"] = events_arr;
+            stored["event_count"] = events_arr.size();
+
+            // Build findings from events.
+            json findings = json::array();
+            json processes = json::array();
+            json file_ops = json::array();
+            json registry_ops = json::array();
+            int process_count = 0;
+
+            // Safe string extraction (handles null values)
+            auto safe_str = [](const json& j, const char* key) -> std::string {
+                if (!j.contains(key)) return "";
+                auto& v = j[key];
+                if (v.is_null()) return "";
+                if (v.is_string()) return v.get<std::string>();
+                return v.dump();
+            };
+            auto safe_int = [](const json& j, const char* key) -> int {
+                if (!j.contains(key)) return 0;
+                auto& v = j[key];
+                if (v.is_number()) return v.get<int>();
+                return 0;
+            };
+
+            for (const auto& ev : events_arr) {
+                auto cat = safe_str(ev, "category");
+                auto act = safe_str(ev, "action");
+                if (cat == "process" && act == "create") {
+                    process_count++;
+                    processes.push_back({
+                        {"pid", safe_int(ev, "pid")},
+                        {"name", safe_str(ev, "name")},
+                        {"commandLine", safe_str(ev, "path")},
+                    });
+                } else if (cat == "file") {
+                    file_ops.push_back({
+                        {"operation", act},
+                        {"path", safe_str(ev, "path")},
+                    });
+                } else if (cat == "registry") {
+                    registry_ops.push_back({
+                        {"operation", act},
+                        {"key", safe_str(ev, "key")},
+                        {"detail", safe_str(ev, "detail")},
+                    });
+                }
+            }
+
+            // Simple scoring
+            int score = 0;
+            if (process_count > 5) score += 20;
+            if (!file_ops.empty()) score += 15;
+            if (!registry_ops.empty()) score += 25;
+            for (const auto& f : file_ops) {
+                auto p = f.value("path", "");
+                if (p.find("Startup") != std::string::npos) { score += 20; findings.push_back({{"severity","high"},{"category","persistence"},{"description","File dropped in Startup folder: " + p}}); }
+                if (p.find("payload") != std::string::npos) { score += 10; findings.push_back({{"severity","medium"},{"category","file_drop"},{"description","Suspicious file created: " + p}}); }
+                if (p.find("svchost") != std::string::npos) { score += 15; findings.push_back({{"severity","high"},{"category","masquerading"},{"description","File masquerading as system process: " + p}}); }
+            }
+            for (const auto& r : registry_ops) {
+                auto k = r.value("key", "") + r.value("detail", "");
+                if (k.find("Run") != std::string::npos) { score += 25; findings.push_back({{"severity","high"},{"category","persistence"},{"description","Registry Run key modified"}}); }
+                if (k.find("service") != std::string::npos || k.find("Service") != std::string::npos) { score += 15; findings.push_back({{"severity","medium"},{"category","persistence"},{"description","New service installed"}}); }
+            }
+            if (score > 100) score = 100;
+
+            std::string verdict = score >= 70 ? "malicious" : score >= 30 ? "suspicious" : "clean";
+
+            stored["verdict"] = verdict;
+            stored["score"] = score;
+            stored["riskLevel"] = verdict;
+            stored["executionDurationMs"] = poll_elapsed * 1000.0;
+            stored["processTree"] = processes;
+            stored["processCount"] = process_count;
+            stored["fileOperations"] = file_ops;
+            stored["registryOperations"] = registry_ops;
+            stored["findings"] = findings;
+            stored["networkConnections"] = json::array();
+            stored["memoryAllocations"] = json::array();
+            stored["screenshots"] = json::array();
+            stored["mitreTechniques"] = json::array();
+            stored["networkSummary"] = {
+                {"totalConnections", 0},
+                {"uniqueHosts", json::array()},
+                {"uniqueURLs", json::array()},
+                {"dnsQueries", json::array()},
+                {"httpRequests", 0},
+            };
+
+            fprintf(stderr, "[ShieldTier] WSB analysis complete: %d events, score=%d, verdict=%s\n",
+                    (int)events_arr.size(), score, verdict.c_str());
+
+            // Store result BEFORE pushing to UI (so getResult finds it)
+            if (config) {
+                std::string result_key = "vm_result_" + session_id;
+                config->set(result_key, stored);
+                config->save();
+                fprintf(stderr, "[ShieldTier] Saved result to config: %s\n", result_key.c_str());
+            }
+
+            if (bridge) {
+                bridge->push_vm_status("completed");
+                bridge->push("vm_result", stored);
+            }
+        });
+
+        {
+            std::lock_guard<std::mutex> lock(threads_mutex_);
+            analysis_threads_.push_back(std::move(worker));
+        }
+
+        return ipc::make_success({{"vm_id", prepared_id}, {"provider", "windows_sandbox"}});
+    }
+
+    // Fallback: QEMU path.
     auto vms = vm_manager_->list_vms();
     if (vms.empty()) {
         return ipc::make_error("no_active_vm");
@@ -776,7 +1164,6 @@ json MessageHandler::handle_submit_sample_to_vm(const json& payload) {
         event_bridge_->push_vm_status("running");
     }
 
-    // Run VM analysis asynchronously — store results on completion
     auto file_copy = file_opt.value();
     auto* vm_mgr = vm_manager_.get();
     auto* bridge = event_bridge_;
@@ -788,15 +1175,14 @@ json MessageHandler::handle_submit_sample_to_vm(const json& payload) {
         if (result.ok()) {
             auto& vm_result = result.value();
 
-            // Score the VM results
             VmScoring scorer;
-            json network_activity;  // populated from INETSim events if available
+            json network_activity;
             auto scored = scorer.score_vm_results(
                 vm_result.events, network_activity, vm_result.duration_ms);
 
-            // Store in config for handle_vm_get_result to retrieve
             json stored = {
                 {"vm_id", vm_id},
+                {"provider", "qemu"},
                 {"success", vm_result.success},
                 {"duration_ms", vm_result.duration_ms},
                 {"event_count", vm_result.events.size()},
@@ -822,6 +1208,7 @@ json MessageHandler::handle_submit_sample_to_vm(const json& payload) {
                 bridge->push_vm_status("error");
                 bridge->push("vm_result", {
                     {"vm_id", vm_id},
+                    {"provider", "qemu"},
                     {"success", false},
                     {"error", result.error().message},
                 });
@@ -834,7 +1221,7 @@ json MessageHandler::handle_submit_sample_to_vm(const json& payload) {
         analysis_threads_.push_back(std::move(worker));
     }
 
-    return ipc::make_success({{"vm_id", vm_id}});
+    return ipc::make_success({{"vm_id", vm_id}, {"provider", "qemu"}});
 }
 
 json MessageHandler::handle_analyze_email(const json& payload) {
@@ -3341,10 +3728,27 @@ json MessageHandler::handle_vm_get_status(const json& /*payload*/) {
         }
     }
 
+    // Check Windows Sandbox availability.
+    bool wsb_available = WindowsSandbox::is_available();
+    std::string wsb_session;
+    {
+        std::lock_guard<std::mutex> lock(threads_mutex_);
+        wsb_session = active_wsb_session_;
+    }
+    if (!wsb_session.empty()) {
+        auto wsb_state = windows_sandbox_->get_state(wsb_session);
+        if (wsb_state == VmState::kBooting) status = "booting";
+        else if (wsb_state == VmState::kReady) status = "ready";
+        else if (wsb_state == VmState::kAnalyzing) status = "analyzing";
+        else if (wsb_state == VmState::kError) status = "error";
+    }
+
     return ipc::make_success({
-        {"installed", installed}, {"status", status},
-        {"activeInstances", vms.size()},
-        {"version", version}, {"accelerator", accelerator}
+        {"installed", installed || wsb_available}, {"status", status},
+        {"activeInstances", vms.size() + (wsb_session.empty() ? 0 : 1)},
+        {"version", version}, {"accelerator", accelerator},
+        {"windows_sandbox_available", wsb_available},
+        {"provider", wsb_available ? "windows_sandbox" : "qemu"}
     });
 }
 
@@ -3381,8 +3785,27 @@ json MessageHandler::handle_vm_install(const json& /*payload*/) {
 }
 
 json MessageHandler::handle_vm_list_images(const json& /*payload*/) {
-    auto catalog = VmInstaller::default_image_catalog();
     json images = json::array();
+
+    // If Windows Sandbox is available, add a virtual image entry so the
+    // existing React panel sees an already-downloaded image and shows the
+    // "ready" view instead of the QEMU setup flow.
+    if (WindowsSandbox::is_available()) {
+        // Use 'reactos-0.4.15' as id so the panel's "Windows" button
+        // (which hardcodes setSelectedImageId('reactos-0.4.15')) auto-selects it.
+        images.push_back({
+            {"id", "reactos-0.4.15"},
+            {"name", "Windows Sandbox (built-in)"},
+            {"os", "windows"},
+            {"downloadSize", 0},
+            {"diskSize", 0},
+            {"downloaded", true},
+            {"size", "Built-in"},
+            {"provider", "windows_sandbox"}
+        });
+    }
+
+    auto catalog = VmInstaller::default_image_catalog();
     for (const auto& spec : catalog) {
         double size_mb = static_cast<double>(spec.size_bytes) / (1024.0 * 1024.0);
         images.push_back({
@@ -3450,8 +3873,26 @@ json MessageHandler::handle_vm_download_image(const json& payload) {
 }
 
 json MessageHandler::handle_vm_get_instances(const json& /*payload*/) {
-    auto vms = vm_manager_->list_vms();
     json instances = json::array();
+
+    // Include Windows Sandbox sessions.
+    if (windows_sandbox_) {
+        auto wsb_sessions = windows_sandbox_->list_sessions();
+        for (const auto& s : wsb_sessions) {
+            std::string state_str = "unknown";
+            if (s.state == VmState::kStopped) state_str = "stopped";
+            else if (s.state == VmState::kBooting) state_str = "booting";
+            else if (s.state == VmState::kReady) state_str = "ready";
+            else if (s.state == VmState::kAnalyzing) state_str = "analyzing";
+            else if (s.state == VmState::kError) state_str = "error";
+            instances.push_back({
+                {"id", s.id}, {"state", state_str}, {"provider", "windows_sandbox"}
+            });
+        }
+    }
+
+    // Include QEMU VMs.
+    auto vms = vm_manager_->list_vms();
     for (const auto& vm : vms) {
         auto state = vm_manager_->get_state(vm.id);
         std::string state_str = "unknown";
@@ -3460,13 +3901,22 @@ json MessageHandler::handle_vm_get_instances(const json& /*payload*/) {
         else if (state == VmState::kReady) state_str = "ready";
         else if (state == VmState::kAnalyzing) state_str = "analyzing";
         else if (state == VmState::kError) state_str = "error";
-        instances.push_back({{"id", vm.id}, {"state", state_str}});
+        instances.push_back({
+            {"id", vm.id}, {"state", state_str}, {"provider", "qemu"}
+        });
     }
     return ipc::make_success({{"instances", instances}});
 }
 
 json MessageHandler::handle_vm_get_result(const json& payload) {
     std::string instance_id = payload.value("instanceId", "");
+    if (instance_id.empty()) {
+        // Check Windows Sandbox sessions first.
+        std::lock_guard<std::mutex> lock(threads_mutex_);
+        if (!active_wsb_session_.empty()) {
+            instance_id = active_wsb_session_;
+        }
+    }
     if (instance_id.empty()) {
         auto vms = vm_manager_->list_vms();
         if (!vms.empty()) instance_id = vms.front().id;
@@ -3485,6 +3935,11 @@ json MessageHandler::handle_vm_get_result(const json& payload) {
 json MessageHandler::handle_vm_has_snapshot(const json& payload) {
     std::string image_id = payload.value("imageId", "");
     if (image_id.empty()) return ipc::make_error("imageId_required");
+
+    // Windows Sandbox doesn't need snapshots — always ready.
+    if (WindowsSandbox::is_available() && image_id == "reactos-0.4.15") {
+        return ipc::make_success({{"imageId", image_id}, {"hasSnapshot", true}});
+    }
 
     auto snapshots = config_store_->get("vm_snapshots");
     bool has = false;

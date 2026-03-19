@@ -133,6 +133,7 @@ export default function VMSandboxPanel({ session, files }: VMSandboxPanelProps) 
   const [selectedOS, setSelectedOS] = useState<'windows' | 'linux'>('linux');
   const [selectedImageId, setSelectedImageId] = useState('alpine-3.19');
   const [timeout, setTimeoutSec] = useState(120);
+  const [networkMode, setNetworkMode] = useState<'internet' | 'nointernet'>('nointernet');
   const [images, setImages] = useState<any[]>([]);
 
   // Active execution state
@@ -156,6 +157,9 @@ export default function VMSandboxPanel({ session, files }: VMSandboxPanelProps) 
   const [showImageManager, setShowImageManager] = useState(false);
   const [downloadingImageId, setDownloadingImageId] = useState<string | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<{ percent: number; downloadedMB: number; totalMB: number } | null>(null);
+
+  // Windows Sandbox mode — shows "Switch to VM Window" instead of embedded display
+  const [isWsbMode, setIsWsbMode] = useState(false);
 
   const eventLogRef = useRef<HTMLDivElement>(null);
   const vmCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -194,7 +198,9 @@ export default function VMSandboxPanel({ session, files }: VMSandboxPanelProps) 
       const vm = (window as any).shieldtier?.vm;
       if (!vm?.onStatus) return;
       const unsub = vm.onStatus((update: VMStatusUpdate) => {
-        if (update.sessionId !== session.id) return;
+        // vm_status events from Windows Sandbox don't include sessionId
+        // so only filter if sessionId is present
+        if (update.sessionId && update.sessionId !== session.id) return;
 
         setVmStatus(update.status);
         if (update.progress) {
@@ -207,8 +213,8 @@ export default function VMSandboxPanel({ session, files }: VMSandboxPanelProps) 
           setLiveError(update.error);
         }
         if (update.status === 'completed') {
-          // Fetch result
-          fetchResult(update.instanceId);
+          // Fetch result — use instanceId from update or fall back to state
+          fetchResult(update.instanceId || vmInstanceId || '');
         }
         if (update.status === 'error' || update.status === 'aborted') {
           setView('ready');
@@ -302,6 +308,18 @@ export default function VMSandboxPanel({ session, files }: VMSandboxPanelProps) 
     }
   }, [events]);
 
+  // Listen for Windows Sandbox mode (no embedded display — user switches to VM window)
+  useEffect(() => {
+    try {
+      const vm = (window as any).shieldtier?.vm;
+      if (!vm?.onWsbRunning) return;
+      const unsub = vm.onWsbRunning((data: any) => {
+        setIsWsbMode(true);
+      });
+      return unsub;
+    } catch {}
+  }, []);
+
   // Listen for live VM screenshots
   useEffect(() => {
     try {
@@ -350,12 +368,39 @@ export default function VMSandboxPanel({ session, files }: VMSandboxPanelProps) 
 
   const fetchResult = useCallback(async (instanceId: string) => {
     try {
-      const r = await (window as any).shieldtier?.vm?.getResult(session.id, instanceId);
-      if (r) {
-        setResult(r);
+      // getResult takes instanceId only (not session.id) — pass instanceId or empty to use active session
+      const r = await (window as any).shieldtier?.vm?.getResult(instanceId || '');
+      if (r && r.verdict) {
+        // Ensure all required arrays exist to prevent render crashes
+        const safeResult: VMAnalysisResult = {
+          instanceId: r.vm_id || instanceId || '',
+          verdict: r.verdict || 'unknown',
+          score: r.score || 0,
+          riskLevel: r.riskLevel || r.verdict || 'unknown',
+          executionDurationMs: r.executionDurationMs || r.duration_ms || 0,
+          processTree: r.processTree || [],
+          processCount: r.processCount || 0,
+          fileOperations: r.fileOperations || [],
+          registryOperations: r.registryOperations || [],
+          networkConnections: r.networkConnections || [],
+          memoryAllocations: r.memoryAllocations || [],
+          screenshots: r.screenshots || [],
+          findings: r.findings || [],
+          networkSummary: {
+            totalConnections: r.networkSummary?.totalConnections || 0,
+            uniqueHosts: r.networkSummary?.uniqueHosts || [],
+            uniqueURLs: r.networkSummary?.uniqueURLs || [],
+            dnsQueries: r.networkSummary?.dnsQueries || [],
+            httpRequests: r.networkSummary?.httpRequests || 0,
+          },
+          mitreTechniques: r.mitreTechniques || [],
+        };
+        setResult(safeResult);
         setView('results');
       }
-    } catch {}
+    } catch (err) {
+      console.error('[VMSandboxPanel] fetchResult error:', err);
+    }
   }, [session.id]);
 
   const handleRunInVM = useCallback(async () => {
@@ -369,6 +414,7 @@ export default function VMSandboxPanel({ session, files }: VMSandboxPanelProps) 
     setVmProgress('');
     setLatestScreenshot(null);
     setResult(null);
+    setIsWsbMode(false);
 
     try {
       // Route through FileAnalysisManager so it creates a pending SandboxResult
@@ -380,7 +426,8 @@ export default function VMSandboxPanel({ session, files }: VMSandboxPanelProps) 
           os: selectedOS,
           imageId: selectedImageId,
           timeoutSeconds: timeout,
-          enableINetSim: true,
+          enableNetwork: networkMode === 'internet',
+          enableINetSim: networkMode === 'nointernet',
           enableScreenshots: true,
         }
       );
@@ -613,15 +660,64 @@ export default function VMSandboxPanel({ session, files }: VMSandboxPanelProps) 
               </div>
             </div>
 
-            {/* Network Safety Notice */}
-            <div className="glass-light border border-green-500/20 rounded-lg p-3 flex items-start gap-2">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" className="text-green-400 mt-0.5 shrink-0" strokeWidth="2">
-                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-              </svg>
-              <div className="text-[11px] text-[color:var(--st-text-secondary)]">
-                <span className="text-green-400 font-medium">Network Isolated</span> —
-                VM traffic is fully contained via QEMU restrict=on. All DNS/HTTP/HTTPS
-                goes to INetSim fake servers with TLS interception. Zero real internet access.
+            {/* Network Mode Toggle */}
+            <div>
+              <label className="block text-xs text-[color:var(--st-text-secondary)] mb-1.5">Network Mode</label>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setNetworkMode('nointernet')}
+                  className={`flex-1 py-2.5 rounded-lg text-xs font-medium border transition-colors ${
+                    networkMode === 'nointernet'
+                      ? 'bg-green-500/20 border-green-500/50 text-green-400'
+                      : 'glass-light border-[color:var(--st-border-subtle)] text-[color:var(--st-text-muted)] hover:text-[color:var(--st-text-primary)]'
+                  }`}
+                >
+                  <div className="flex items-center justify-center gap-1.5">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                    </svg>
+                    No Internet
+                  </div>
+                </button>
+                <button
+                  onClick={() => setNetworkMode('internet')}
+                  className={`flex-1 py-2.5 rounded-lg text-xs font-medium border transition-colors ${
+                    networkMode === 'internet'
+                      ? 'bg-yellow-500/20 border-yellow-500/50 text-yellow-400'
+                      : 'glass-light border-[color:var(--st-border-subtle)] text-[color:var(--st-text-muted)] hover:text-[color:var(--st-text-primary)]'
+                  }`}
+                >
+                  <div className="flex items-center justify-center gap-1.5">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <circle cx="12" cy="12" r="10"/>
+                      <line x1="2" y1="12" x2="22" y2="12"/>
+                      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+                    </svg>
+                    Internet
+                  </div>
+                </button>
+              </div>
+              <div className={`mt-2 rounded-lg p-2 text-[11px] flex items-start gap-1.5 ${
+                networkMode === 'nointernet'
+                  ? 'glass-light border border-green-500/20 text-[color:var(--st-text-secondary)]'
+                  : 'glass-light border border-yellow-500/20 text-[color:var(--st-text-secondary)]'
+              }`}>
+                {networkMode === 'nointernet' ? (
+                  <>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" className="text-green-400 mt-0.5 shrink-0" strokeWidth="2">
+                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                    </svg>
+                    <span><span className="text-green-400 font-medium">Isolated</span> — No network adapter. Agent monitors processes, files, and registry changes. Safe for unknown malware.</span>
+                  </>
+                ) : (
+                  <>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" className="text-yellow-400 mt-0.5 shrink-0" strokeWidth="2">
+                      <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                      <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                    </svg>
+                    <span><span className="text-yellow-400 font-medium">Caution</span> — Sandbox has full internet access. Malware can contact C2 servers, exfiltrate data, and download payloads.</span>
+                  </>
+                )}
               </div>
             </div>
 
@@ -656,10 +752,13 @@ export default function VMSandboxPanel({ session, files }: VMSandboxPanelProps) 
             <div aria-live="polite">
               <p className="text-xs text-[color:var(--st-text-primary)] font-medium">
                 {vmStatus === 'preparing' && 'Preparing VM...'}
-                {vmStatus === 'booting' && 'Booting VM...'}
+                {vmStatus === 'booting' && 'Booting sandbox...'}
+                {vmStatus === 'running' && (isWsbMode ? 'Sandbox running — switch to VM window to interact' : 'Executing — monitoring behaviors...')}
+                {vmStatus === 'connecting' && 'Connecting to sandbox...'}
                 {vmStatus === 'injecting' && 'Injecting sample...'}
                 {vmStatus === 'executing' && 'Executing — monitoring behaviors...'}
                 {vmStatus === 'collecting' && 'Collecting results...'}
+                {vmStatus === 'complete' && 'Analysis complete'}
               </p>
               {vmProgress && (
                 <p className="text-[10px] text-cyan-400 font-mono">{vmProgress}</p>
@@ -686,7 +785,34 @@ export default function VMSandboxPanel({ session, files }: VMSandboxPanelProps) 
 
         {/* Live VM Display */}
         <div className="flex-[3] min-h-0 bg-black flex items-center justify-center border-b border-[color:var(--st-border)]">
-          {latestScreenshot ? (
+          {isWsbMode ? (
+            <div className="flex flex-col items-center gap-4">
+              <div className="w-16 h-16 rounded-2xl bg-blue-500/20 flex items-center justify-center">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-blue-400">
+                  <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+                  <line x1="8" y1="21" x2="16" y2="21"/>
+                  <line x1="12" y1="17" x2="12" y2="21"/>
+                </svg>
+              </div>
+              <div className="text-center">
+                <p className="text-sm text-[color:var(--st-text-primary)] font-medium">Windows Sandbox is Running</p>
+                <p className="text-[11px] text-[color:var(--st-text-muted)] mt-1">The sample is executing in an isolated Windows Sandbox VM</p>
+              </div>
+              <button
+                onClick={() => {
+                  try { (window as any).shieldtier?.vm?.focusSandboxWindow(); } catch {}
+                }}
+                className="px-6 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium transition-colors flex items-center gap-2"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M15 3h6v6"/>
+                  <path d="M10 14L21 3"/>
+                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                </svg>
+                Switch to VM Window
+              </button>
+            </div>
+          ) : latestScreenshot ? (
             <canvas
               ref={vmCanvasRef}
               className="max-w-full max-h-full object-contain"

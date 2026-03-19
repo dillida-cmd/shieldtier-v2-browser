@@ -962,7 +962,12 @@
         return invoke('vm_get_agent_status', {});
       },
 
+      focusSandboxWindow: function () {
+        return invoke('wsb_focus_window', {});
+      },
+
       onStatus: function (callback) { return on('vm_status', callback); },
+      onWsbRunning: function (callback) { return on('wsb_running', callback); },
       onInstallProgress: function (callback) { return on('vm_install_progress', callback); },
       onImageDownloadProgress: function (callback) { return on('vm_image_download_progress', callback); },
       onSnapshotProgress: function (callback) { return on('vm_snapshot_progress', callback); },

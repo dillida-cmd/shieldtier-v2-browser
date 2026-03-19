@@ -25,6 +25,7 @@ inline constexpr const char* kActionNavStop = "nav_stop";
 inline constexpr const char* kActionStartVm = "start_vm";
 inline constexpr const char* kActionStopVm = "stop_vm";
 inline constexpr const char* kActionSubmitSampleToVm = "submit_sample_to_vm";
+inline constexpr const char* kActionWsbFocusWindow = "wsb_focus_window";
 inline constexpr const char* kActionAnalyzeEmail = "analyze_email";
 inline constexpr const char* kActionAnalyzeLogs = "analyze_logs";
 inline constexpr const char* kActionGetLogResults = "get_log_results";
