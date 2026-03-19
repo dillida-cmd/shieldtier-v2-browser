@@ -57,8 +57,9 @@ export default function App() {
   const [pendingCaseId, setPendingCaseId] = useState('');
   const [showCloseConfirm, setShowCloseConfirm] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
-  const [authState, setAuthState] = useState<AuthState>('checking');
+  const [authState, setAuthState] = useState<AuthState>('authenticated');  // Skip login gate — app works without auth
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [showLoginForChat, setShowLoginForChat] = useState(false);  // Login only when chat requires it
   const [avatar, setAvatar] = useState(localStorage.getItem('shieldtier-avatar') || 'shield');
   const [status, setStatus] = useState<string>('No proxy configured');
 
@@ -76,11 +77,11 @@ export default function App() {
   const [updateState, setUpdateState] = useState<UpdateState | null>(null);
 
   const activeSession = sessions.find(s => s.id === activeSessionId) || null;
-  const analystName = authUser?.analystName || '';
+  const analystName = authUser?.analystName || authUser?.name || '';
 
-  // Track chat unread count — always active when authenticated
+  // Track chat unread count — active when user is logged in
   useEffect(() => {
-    if (authState !== 'authenticated') return;
+    if (!authUser) return;
     const unsub = window.shieldtier.chat.onMessageReceived(() => {
       if (!chatOpen) {
         chatUnreadRef.current++;
@@ -91,6 +92,11 @@ export default function App() {
   }, [chatOpen, authState]);
 
   const handleToggleChat = useCallback(() => {
+    // Require login for chat
+    if (!authUser) {
+      setShowLoginForChat(true);
+      return;
+    }
     setChatOpen(prev => {
       if (!prev) {
         // Opening chat — reset unread
@@ -128,17 +134,24 @@ export default function App() {
     })();
   }, []);
 
-  // Restore session on mount: try auth restore, then proxy + chat
+  // Restore session on mount: try auth silently in background, load config regardless
   useEffect(() => {
     (async () => {
+      // Load proxy config — doesn't require auth
       try {
-        // Attempt to restore cloud auth session
+        const saved = await window.shieldtier.config.getProxyConfig();
+        if (saved) {
+          setProxyConfig(saved);
+          setStatus(formatProxyStatus(saved));
+        }
+      } catch {}
+
+      // Try to silently restore auth session (background, non-blocking)
+      try {
         const authResult = await window.shieldtier.auth.restoreSession();
         if (authResult.success && authResult.user) {
           setAuthUser(authResult.user);
-          setAuthState('authenticated');
-
-          // Fetch fresh profile from server (avatar, emailVerified, etc.)
+          // Fetch fresh profile
           try {
             const freshProfile = await window.shieldtier.auth.refreshProfile();
             if (freshProfile.success && freshProfile.user) {
@@ -149,23 +162,11 @@ export default function App() {
               }
             }
           } catch {}
-        } else {
-          setAuthState('unauthenticated');
-          return; // Don't load other config until authenticated
+          // Init chat identity if logged in
+          window.shieldtier.chat.getIdentity().catch(() => null);
         }
-
-        // Restore proxy config and chat identity
-        const [saved] = await Promise.all([
-          window.shieldtier.config.getProxyConfig(),
-          window.shieldtier.chat.getIdentity().catch(() => null),
-        ]);
-        if (saved) {
-          setProxyConfig(saved);
-          setStatus(formatProxyStatus(saved));
-        }
-      } catch {
-        setAuthState('unauthenticated');
-      }
+        // If auth fails, that's fine — app still works, chat will prompt login
+      } catch {}
     })();
   }, []);
 
@@ -178,15 +179,14 @@ export default function App() {
     return cleanup;
   }, []);
 
-  // Auto-check for updates after auth + listen for status events
+  // Auto-check for updates on mount (no auth required)
   useEffect(() => {
-    if (authState !== 'authenticated') return;
     window.shieldtier.update.check().catch(() => {});
     const unsub = window.shieldtier.update.onStatus((state: UpdateState) => {
       setUpdateState(state);
     });
     return unsub;
-  }, [authState]);
+  }, []);
 
   const handleAuthenticated = useCallback(async (user: AuthUser) => {
     setAuthUser(user);
@@ -338,31 +338,45 @@ export default function App() {
     threatFeedMatches: 0,
   }), []);
 
-  // ── Auth States ──
+  // ── Chat requires login — show login modal when chat is opened without auth ──
+  const handleChatToggle = useCallback(() => {
+    if (!authUser) {
+      // Not logged in — show login prompt for chat
+      setShowLoginForChat(true);
+      return;
+    }
+    setChatOpen(prev => !prev);
+  }, [authUser]);
 
-  // Checking — show nothing (or splash)
-  if (authState === 'checking') {
+  // After login from chat prompt, open chat automatically
+  const handleChatLoginSuccess = useCallback(async (user: AuthUser) => {
+    setAuthUser(user);
+    setShowLoginForChat(false);
+    // Init chat identity
+    try { await window.shieldtier.chat.getIdentity(); } catch {}
+    setChatOpen(true);
+  }, []);
+
+  // Login screen for chat — modal overlay, not blocking the app
+  if (showLoginForChat) {
     return (
-      <div className="flex items-center justify-center h-screen bg-[color:var(--st-bg-base)]" role="status" aria-live="polite">
-        <div className="text-center">
-          <div className="flex justify-center mb-4">
-            <svg width="48" height="48" viewBox="0 0 32 32" fill="none" className="animate-pulse">
-              <path d="M16 2L4 8v8c0 7.7 5.1 14.9 12 16 6.9-1.1 12-8.3 12-16V8L16 2z" fill="var(--st-info)" opacity="0.2"/>
-              <path d="M16 2L4 8v8c0 7.7 5.1 14.9 12 16 6.9-1.1 12-8.3 12-16V8L16 2z" stroke="var(--st-info)" strokeWidth="1.5" fill="none"/>
-            </svg>
+      <>
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center">
+          <div className="relative">
+            <button
+              onClick={() => setShowLoginForChat(false)}
+              className="absolute top-2 right-2 z-10 text-[color:var(--st-text-muted)] hover:text-[color:var(--st-text-primary)] text-lg"
+            >
+              ✕
+            </button>
+            <LoginScreen onAuthenticated={handleChatLoginSuccess} />
           </div>
-          <p className="text-xs text-[color:var(--st-text-muted)]">Loading ShieldTier...</p>
         </div>
-      </div>
+      </>
     );
   }
 
-  // Unauthenticated — show login screen
-  if (authState === 'unauthenticated') {
-    return <LoginScreen onAuthenticated={handleAuthenticated} />;
-  }
-
-  // Authenticated — full app
+  // ── Main App (always accessible — no login gate) ──
   return (
     <ThreatLevelProvider signals={threatSignals}>
     <div className="flex flex-col h-screen bg-[color:var(--st-bg-base)]">
