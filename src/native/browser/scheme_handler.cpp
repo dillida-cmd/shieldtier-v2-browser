@@ -38,7 +38,11 @@ bool SchemeHandler::Open(CefRefPtr<CefRequest> request, bool& handle_request,
     std::error_code ec;
     fs::path canonical_root = fs::weakly_canonical(root_dir_, ec);
     fs::path canonical_file = fs::weakly_canonical(file_path, ec);
-    if (!canonical_file.string().starts_with(canonical_root.string())) {
+    auto root_str = canonical_root.string();
+    auto file_str = canonical_file.string();
+    if (!file_str.starts_with(root_str)) {
+        fprintf(stderr, "[ShieldTier] 403 path escape: root=%s file=%s\n",
+                root_str.c_str(), file_str.c_str());
         status_code_ = 403;
         return true;
     }
@@ -64,6 +68,8 @@ bool SchemeHandler::Open(CefRefPtr<CefRequest> request, bool& handle_request,
 
     mime_type_ = get_mime_type(file_path.extension().string());
     status_code_ = 200;
+    fprintf(stderr, "[ShieldTier] Serving: %s (%s, %zu bytes)\n",
+            file_path.string().c_str(), mime_type_.c_str(), data_.size());
 
     // Inject preload shim into index.html — creates window.shieldtier API
     // that V1's React renderer expects, routing calls through cefQuery

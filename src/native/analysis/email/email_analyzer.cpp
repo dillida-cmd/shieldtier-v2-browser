@@ -4,9 +4,24 @@
 #include <array>
 #include <chrono>
 #include <cstdio>
+#include <ctime>
 #include <regex>
 #include <sstream>
 #include <unordered_set>
+
+#ifdef _WIN32
+// strptime is not available on MSVC — provide a minimal implementation
+// that handles the two formats used in this file.
+#include <iomanip>
+static char* strptime(const char* s, const char* fmt, struct tm* tm) {
+    std::istringstream input(s);
+    input.imbue(std::locale("C"));
+    input >> std::get_time(tm, fmt);
+    if (input.fail()) return nullptr;
+    // Return pointer past consumed characters
+    return const_cast<char*>(s + static_cast<size_t>(input.tellg()));
+}
+#endif
 
 namespace shieldtier {
 

@@ -178,5 +178,5 @@ if (Test-Path $vsWhere) {
     $vsPath = & $vsWhere -latest -property installationPath
     Write-Host " Visual Studio: $vsPath" -ForegroundColor Green
 } else {
-    Write-Host " WARNING: Visual Studio not found. Install VS2022 with 'Desktop development with C++'" -ForegroundColor Red
+    Write-Host ' WARNING: Visual Studio not found. Install VS2022 with Desktop development with C++' -ForegroundColor Red
 }
