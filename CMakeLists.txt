@@ -15,6 +15,12 @@ if(MSVC)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" CACHE STRING "" FORCE)
 endif()
 
+# Ensure NDEBUG is defined for Release builds (disables dev auth bypass,
+# enables security hardening, removes debug assertions)
+add_compile_definitions($<$<CONFIG:Release>:NDEBUG>
+                        $<$<CONFIG:RelWithDebInfo>:NDEBUG>
+                        $<$<CONFIG:MinSizeRel>:NDEBUG>)
+
 # ---------------------------------------------------------------------------
 # Platform detection
 # ---------------------------------------------------------------------------

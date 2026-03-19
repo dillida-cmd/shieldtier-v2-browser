@@ -25,16 +25,25 @@
 
 namespace shieldtier {
 
-// Dev auth bypass: when SHIELDTIER_DEV_AUTH=1, skip cloud login entirely
+// Dev auth bypass — DEBUG BUILDS ONLY.
+// In release builds (NDEBUG defined), this is always false.
 static bool is_dev_auth_enabled() {
+#ifdef NDEBUG
+    return false;  // NEVER allow dev auth in release builds
+#else
     static int cached = -1;
     if (cached < 0) {
         const char* val = std::getenv("SHIELDTIER_DEV_AUTH");
         cached = (val && std::string(val) == "1") ? 1 : 0;
+        if (cached) {
+            fprintf(stderr, "[SECURITY WARNING] Dev auth bypass is active — DO NOT ship this build.\n");
+        }
     }
     return cached == 1;
+#endif
 }
 
+#ifndef NDEBUG
 static json make_dev_user() {
     return json{
         {"id", "dev-local-user"},
@@ -45,6 +54,7 @@ static json make_dev_user() {
         {"avatar", "shield"},
     };
 }
+#endif
 
 MessageHandler::MessageHandler(SessionManager* session_manager)
     : session_manager_(session_manager),
@@ -3402,9 +3412,11 @@ json MessageHandler::handle_submit_archive_password(const json& payload) {
     std::string password = payload.value("password", "");
     if (sha256.empty()) return ipc::make_error("sha256_required");
 
-    // Store password and re-trigger analysis
-    config_store_->set("archive_password_" + sha256, password);
-    config_store_->save();
+    // Store password in-memory only (NOT persisted to disk — security)
+    {
+        std::lock_guard<std::mutex> lock(results_mutex_);
+        analysis_results_["archive_pw_" + sha256] = json{{"password", password}};
+    }
     // Re-trigger analysis pipeline with the password available
     auto file_opt = session_manager_->get_captured_download(sha256);
     if (file_opt.has_value()) {
@@ -3417,8 +3429,11 @@ json MessageHandler::handle_submit_archive_password(const json& payload) {
 json MessageHandler::handle_skip_archive_password(const json& payload) {
     std::string sha256 = payload.value("sha256", "");
     if (sha256.empty()) return ipc::make_error("sha256_required");
-    config_store_->set("archive_password_" + sha256, "__skipped__");
-    config_store_->save();
+    // Mark as skipped in-memory only
+    {
+        std::lock_guard<std::mutex> lock(results_mutex_);
+        analysis_results_["archive_pw_" + sha256] = json{{"password", "__skipped__"}};
+    }
     return ipc::make_success({{"status", "skipped"}, {"sha256", sha256}});
 }
 

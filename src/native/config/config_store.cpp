@@ -7,6 +7,7 @@
 
 #ifdef _POSIX_VERSION
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
@@ -18,10 +19,14 @@ ConfigStore::ConfigStore(const std::string& config_path)
 Result<json> ConfigStore::load() {
     std::lock_guard<std::mutex> lock(mutex_);
 
-    // Ensure parent directory exists
+    // Ensure parent directory exists with restrictive permissions
     std::error_code ec;
     auto parent = std::filesystem::path(config_path_).parent_path();
     std::filesystem::create_directories(parent, ec);
+#ifdef _POSIX_VERSION
+    // Restrict config directory to owner only (0700)
+    ::chmod(parent.c_str(), S_IRWXU);
+#endif
 
     if (!std::filesystem::exists(config_path_)) {
         // First run — start with empty config, no error
@@ -133,6 +138,11 @@ Result<bool> ConfigStore::write_atomic(const std::string& path, const std::strin
         std::remove(tmp_path.c_str());
         return Error("Failed to rename temp file to config path", "rename_error");
     }
+
+#ifdef _POSIX_VERSION
+    // Restrict config file to owner-only read/write (0600)
+    ::chmod(path.c_str(), S_IRUSR | S_IWUSR);
+#endif
 
     return true;
 }
