@@ -61,6 +61,9 @@ export default function App() {
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [showLoginForChat, setShowLoginForChat] = useState(false);  // Login only when chat requires it
   const [avatar, setAvatar] = useState(localStorage.getItem('shieldtier-avatar') || 'shield');
+  const [localAnalystName, setLocalAnalystName] = useState(localStorage.getItem('shieldtier-analyst-name') || '');
+  const [showNamePrompt, setShowNamePrompt] = useState(false);
+  const [nameInput, setNameInput] = useState('');
   const [status, setStatus] = useState<string>('No proxy configured');
 
   // Chat state — app-level so it's always available
@@ -77,7 +80,7 @@ export default function App() {
   const [updateState, setUpdateState] = useState<UpdateState | null>(null);
 
   const activeSession = sessions.find(s => s.id === activeSessionId) || null;
-  const analystName = authUser?.analystName || authUser?.name || '';
+  const analystName = authUser?.analystName || authUser?.name || localAnalystName;
 
   // Track chat unread count — active when user is logged in
   useEffect(() => {
@@ -132,6 +135,14 @@ export default function App() {
         }
       } catch {}
     })();
+  }, []);
+
+  // First-run: prompt for analyst name if not set
+  useEffect(() => {
+    const saved = localStorage.getItem('shieldtier-analyst-name');
+    if (!saved) {
+      setShowNamePrompt(true);
+    }
   }, []);
 
   // Restore session on mount: try auth silently in background, load config regardless
@@ -356,6 +367,59 @@ export default function App() {
     try { await window.shieldtier.chat.getIdentity(); } catch {}
     setChatOpen(true);
   }, []);
+
+  // First-run name prompt
+  if (showNamePrompt) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-[color:var(--st-bg-base)]">
+        <div className="text-center max-w-sm mx-auto p-8">
+          {/* Shield logo */}
+          <div className="flex justify-center mb-6">
+            <svg width="64" height="64" viewBox="0 0 64 64" fill="none">
+              <defs>
+                <linearGradient id="sg" x1="16" y1="8" x2="48" y2="56" gradientUnits="userSpaceOnUse">
+                  <stop stopColor="#3b82f6" /><stop offset="0.5" stopColor="#8b5cf6" /><stop offset="1" stopColor="#06b6d4" />
+                </linearGradient>
+              </defs>
+              <path d="M32 4L8 16v16c0 14.4 10.2 27.2 24 30 13.8-2.8 24-15.6 24-30V16L32 4z" stroke="url(#sg)" strokeWidth="2.5" fill="none" />
+              <path d="M32 14L14 22v10c0 10.8 7.6 20.4 18 22.5 10.4-2.1 18-11.7 18-22.5V22L32 14z" fill="url(#sg)" opacity="0.15" />
+              <path d="M24 32l5 5 11-11" stroke="url(#sg)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </div>
+          <h1 className="text-xl font-bold text-[color:var(--st-text-primary)] mb-1">Welcome to ShieldTier</h1>
+          <p className="text-xs text-[color:var(--st-text-muted)] mb-6">Enter your analyst name to get started. This will appear in your investigation reports.</p>
+          <input
+            type="text"
+            value={nameInput}
+            onChange={e => setNameInput(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && nameInput.trim()) {
+                localStorage.setItem('shieldtier-analyst-name', nameInput.trim());
+                setLocalAnalystName(nameInput.trim());
+                setShowNamePrompt(false);
+              }
+            }}
+            placeholder="Your name (e.g. John Smith)"
+            autoFocus
+            className="w-full bg-[color:var(--st-bg-panel)] border border-[color:var(--st-border)] rounded-lg px-4 py-2.5 text-sm text-[color:var(--st-text-primary)] placeholder-[color:var(--st-text-muted)] focus:border-blue-500/50 outline-none mb-4"
+          />
+          <button
+            onClick={() => {
+              if (nameInput.trim()) {
+                localStorage.setItem('shieldtier-analyst-name', nameInput.trim());
+                setLocalAnalystName(nameInput.trim());
+                setShowNamePrompt(false);
+              }
+            }}
+            disabled={!nameInput.trim()}
+            className="w-full py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            Continue
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // Login screen for chat — modal overlay, not blocking the app
   if (showLoginForChat) {
