@@ -498,19 +498,8 @@ export default function VMSandboxPanel({ session, files }: VMSandboxPanelProps) 
             </div>
           </div>
           <button
-            onClick={() => {
-              try {
-                // Open Windows Features dialog
-                (window as any).shieldtier?.view?.navigate?.('', 'optionalfeatures.exe');
-              } catch {}
-            }}
-            className="px-6 py-2.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-sm font-medium transition-colors"
-          >
-            Open Windows Features
-          </button>
-          <button
             onClick={() => checkSetup()}
-            className="block mx-auto px-4 py-1.5 text-xs text-[color:var(--st-text-muted)] hover:text-[color:var(--st-text-primary)] transition-colors"
+            className="px-6 py-2.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-sm font-medium transition-colors"
           >
             Check Again
           </button>
