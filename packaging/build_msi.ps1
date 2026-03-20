@@ -53,9 +53,73 @@ Copy-Item (Join-Path $ROOT "src\renderer\shim\preload-shim.js") -Destination $RE
 Write-Host "[3/4] Generating MSI..." -ForegroundColor Yellow
 $WXS_PATH = Join-Path $ROOT "packaging\shieldtier.wxs"
 
-# Generate component list from staging dir
-$GUID_PRODUCT = [guid]::NewGuid().ToString().ToUpper()
+# Generate component list from ALL files in staging dir
 $GUID_UPGRADE = "7B2D4F5E-8A1C-4D3E-9F6B-1A2B3C4D5E6F"
+
+# Collect all files and build WiX components dynamically
+$allFiles = Get-ChildItem -Path $STAGING -Recurse -File
+$components = ""
+$directories = @{}
+$fileIndex = 0
+
+foreach ($file in $allFiles) {
+    $fileIndex++
+    $relPath = $file.FullName.Substring($STAGING.Length + 1)
+    $relDir = Split-Path $relPath -Parent
+    $compId = "Comp_$fileIndex"
+    $fileId = "File_$fileIndex"
+    $dirId = "INSTALLFOLDER"
+
+    # Map subdirectories
+    if ($relDir) {
+        $dirId = "Dir_" + ($relDir -replace '[\\/ .\-]', '_')
+        if (-not $directories.ContainsKey($relDir)) {
+            $directories[$relDir] = $dirId
+        }
+    }
+
+    $sourcePath = $file.FullName
+    $components += "      <Component Id=`"$compId`" Directory=`"$dirId`" Guid=`"*`">`n"
+    $components += "        <File Id=`"$fileId`" Source=`"$sourcePath`" KeyPath=`"yes`" />`n"
+    $components += "      </Component>`n"
+}
+
+# Build nested directory tree XML
+# Sort dirs so parents come before children
+function Build-DirTree($dirs) {
+    $result = ""
+    $sorted = $dirs.Keys | Sort-Object
+    $emitted = @{}
+
+    foreach ($dir in $sorted) {
+        $parts = $dir -split '\\'
+        # Ensure all parent dirs are emitted first
+        for ($i = 0; $i -lt $parts.Length; $i++) {
+            $partial = ($parts[0..$i] -join '\')
+            if ($emitted.ContainsKey($partial)) { continue }
+
+            $thisName = $parts[$i]
+            $thisId = if ($dirs.ContainsKey($partial)) { $dirs[$partial] } else { "Dir_" + ($partial -replace '[\\/ .\-]', '_') }
+
+            # Register if not already in dirs
+            if (-not $dirs.ContainsKey($partial)) { $dirs[$partial] = $thisId }
+
+            $parentId = if ($i -eq 0) { "INSTALLFOLDER" } else {
+                $parentPartial = ($parts[0..($i-1)] -join '\')
+                $dirs[$parentPartial]
+            }
+
+            $indent = "        " + ("  " * $i)
+            $result += "${indent}<Directory Id=`"$thisId`" Name=`"$thisName`" />`n"
+            $emitted[$partial] = $true
+        }
+    }
+    return $result
+}
+
+$dirXml = Build-DirTree $directories
+
+Write-Host "  Packaging $fileIndex files..." -ForegroundColor Gray
 
 $wxsContent = @"
 <?xml version="1.0" encoding="UTF-8"?>
@@ -69,14 +133,12 @@ $wxsContent = @"
 
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="ShieldTier">
-        <Directory Id="RENDERERFOLDER" Name="renderer" />
+$dirXml
       </Directory>
     </StandardDirectory>
 
-    <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
-      <Component Id="MainExecutable" Guid="*">
-        <File Id="ShieldTierExe" Source="$STAGING\shieldtier.exe" KeyPath="yes" />
-      </Component>
+    <ComponentGroup Id="ProductComponents">
+$components
     </ComponentGroup>
 
     <!-- Desktop shortcut -->

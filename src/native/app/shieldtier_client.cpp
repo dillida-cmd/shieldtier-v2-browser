@@ -265,10 +265,26 @@ void ShieldTierClient::set_content_bounds(int x, int y, int w, int h) {
     auto host = content_client_->browser()->GetHost();
     HWND hwnd = host->GetWindowHandle();
     if (hwnd) {
-        SetWindowPos(hwnd, nullptr, x, y, w, h, SWP_NOZORDER | SWP_SHOWWINDOW);
+        // Apply DPI scaling: getBoundingClientRect returns CSS pixels,
+        // but SetWindowPos needs device pixels on high-DPI displays.
+        HWND parent = GetParent(hwnd);
+        float scale = 1.0f;
+        if (parent) {
+            UINT dpi = GetDpiForWindow(parent);
+            if (dpi > 0) scale = static_cast<float>(dpi) / 96.0f;
+        }
+        int px = static_cast<int>(x * scale);
+        int py = static_cast<int>(y * scale);
+        int pw = static_cast<int>(w * scale);
+        int ph = static_cast<int>(h * scale);
+
+        // HWND_TOP ensures content browser renders above the UI browser
+        SetWindowPos(hwnd, HWND_TOP, px, py, pw, ph, SWP_SHOWWINDOW);
         host->NotifyMoveOrResizeStarted();
         host->WasResized();
         has_pending_bounds_ = false;
+        fprintf(stderr, "[ShieldTier] set_content_bounds: HWND=%p at %d,%d %dx%d (scale=%.2f)\n",
+                static_cast<void*>(hwnd), px, py, pw, ph, scale);
     }
 #endif
 }

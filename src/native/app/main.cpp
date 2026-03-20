@@ -54,6 +54,18 @@ int main(int argc, char* argv[]) {
     settings.log_severity = LOGSEVERITY_WARNING;
     settings.remote_debugging_port = 9222;
 
+#if defined(_WIN32)
+    // Set resource paths relative to the exe so it works on any machine.
+    {
+        wchar_t exe_path[MAX_PATH] = {};
+        GetModuleFileNameW(nullptr, exe_path, MAX_PATH);
+        namespace fs = std::filesystem;
+        auto exe_dir = fs::path(exe_path).parent_path();
+        CefString(&settings.resources_dir_path) = exe_dir.string();
+        CefString(&settings.locales_dir_path) = (exe_dir / "locales").string();
+    }
+#endif
+
 #if defined(OS_MAC)
     {
         char exe_buf[4096];

@@ -77,6 +77,7 @@ if(APPLE)
 endif()
 
 if(OS_WINDOWS)
+    list(APPEND SHIELDTIER_SOURCES shieldtier.rc)
     add_executable(shieldtier WIN32 ${SHIELDTIER_SOURCES})
 else()
     add_executable(shieldtier ${SHIELDTIER_SOURCES})

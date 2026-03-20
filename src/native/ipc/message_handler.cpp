@@ -43,7 +43,6 @@ static bool is_dev_auth_enabled() {
 #endif
 }
 
-#ifndef NDEBUG
 static json make_dev_user() {
     return json{
         {"id", "dev-local-user"},
@@ -54,7 +53,6 @@ static json make_dev_user() {
         {"avatar", "shield"},
     };
 }
-#endif
 
 MessageHandler::MessageHandler(SessionManager* session_manager)
     : session_manager_(session_manager),
