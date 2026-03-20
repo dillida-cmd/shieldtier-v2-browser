@@ -53,6 +53,7 @@ int main(int argc, char* argv[]) {
     CefString(&settings.locale) = "en-US";
     settings.log_severity = LOGSEVERITY_WARNING;
     settings.remote_debugging_port = 9222;
+    settings.persist_session_cookies = true;
 
 #if defined(_WIN32)
     // Set resource paths relative to the exe so it works on any machine.

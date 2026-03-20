@@ -84,37 +84,53 @@ foreach ($file in $allFiles) {
     $components += "      </Component>`n"
 }
 
-# Build nested directory tree XML
-# Sort dirs so parents come before children
+# Build nested directory tree — WiX requires children inside parents
+# Use StandardDirectory + nested Directory elements
 function Build-DirTree($dirs) {
-    $result = ""
-    $sorted = $dirs.Keys | Sort-Object
-    $emitted = @{}
+    # Build a tree structure: parent -> children
+    $tree = @{}  # parentPath -> @(childName, childPath, childId)
+    $allPaths = @{}
 
+    $sorted = $dirs.Keys | Sort-Object
     foreach ($dir in $sorted) {
         $parts = $dir -split '\\'
-        # Ensure all parent dirs are emitted first
         for ($i = 0; $i -lt $parts.Length; $i++) {
             $partial = ($parts[0..$i] -join '\')
-            if ($emitted.ContainsKey($partial)) { continue }
+            if ($allPaths.ContainsKey($partial)) { continue }
 
             $thisName = $parts[$i]
             $thisId = if ($dirs.ContainsKey($partial)) { $dirs[$partial] } else { "Dir_" + ($partial -replace '[\\/ .\-]', '_') }
-
-            # Register if not already in dirs
             if (-not $dirs.ContainsKey($partial)) { $dirs[$partial] = $thisId }
+            $allPaths[$partial] = $thisId
 
-            $parentId = if ($i -eq 0) { "INSTALLFOLDER" } else {
-                $parentPartial = ($parts[0..($i-1)] -join '\')
-                $dirs[$parentPartial]
-            }
-
-            $indent = "        " + ("  " * $i)
-            $result += "${indent}<Directory Id=`"$thisId`" Name=`"$thisName`" />`n"
-            $emitted[$partial] = $true
+            $parentPath = if ($i -eq 0) { "" } else { ($parts[0..($i-1)] -join '\') }
+            if (-not $tree.ContainsKey($parentPath)) { $tree[$parentPath] = @() }
+            $tree[$parentPath] += ,@($thisName, $partial, $thisId)
         }
     }
-    return $result
+
+    # Recursive XML generation
+    function Render-Children($parentPath, $indent) {
+        $xml = ""
+        if ($tree.ContainsKey($parentPath)) {
+            foreach ($child in $tree[$parentPath]) {
+                $name = $child[0]
+                $path = $child[1]
+                $id = $child[2]
+                $childXml = Render-Children $path "$indent  "
+                if ($childXml) {
+                    $xml += "${indent}<Directory Id=`"$id`" Name=`"$name`">`n"
+                    $xml += $childXml
+                    $xml += "${indent}</Directory>`n"
+                } else {
+                    $xml += "${indent}<Directory Id=`"$id`" Name=`"$name`" />`n"
+                }
+            }
+        }
+        return $xml
+    }
+
+    return Render-Children "" "        "
 }
 
 $dirXml = Build-DirTree $directories
