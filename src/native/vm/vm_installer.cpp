@@ -430,15 +430,15 @@ std::vector<VmImageSpec> VmInstaller::default_image_catalog() {
             "alpine-3.19",
             "Alpine Linux 3.19",
             "linux",
-            "https://dl-cdn.alpinelinux.org/alpine/v3.19/releases/x86_64/alpine-virt-3.19.7-x86_64.iso",
-            85 * 1024 * 1024,  // ~85MB ISO
+            "https://img.socbrowser.com/vm/alpine-3.19.qcow2",
+            85 * 1024 * 1024,  // ~85MB
             ""
         },
         {
             "reactos-0.4.15",
             "ReactOS 0.4.15",
             "windows",
-            "https://sourceforge.net/projects/reactos/files/ReactOS/0.4.15/ReactOS-0.4.15-live.zip/download",
+            "https://img.socbrowser.com/vm/reactos-0.4.15.qcow2",
             200 * 1024 * 1024,  // ~200MB
             ""
         }
