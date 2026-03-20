@@ -61,7 +61,7 @@ export default function App() {
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [showLoginForChat, setShowLoginForChat] = useState(false);  // Login only when chat requires it
   const [avatar, setAvatar] = useState(localStorage.getItem('shieldtier-avatar') || 'shield');
-  const [localAnalystName, setLocalAnalystName] = useState(localStorage.getItem('shieldtier-analyst-name') || '');
+  const [localAnalystName, setLocalAnalystName] = useState('');
   const [showNamePrompt, setShowNamePrompt] = useState(false);
   const [nameInput, setNameInput] = useState('');
   const [status, setStatus] = useState<string>('No proxy configured');
@@ -137,12 +137,20 @@ export default function App() {
     })();
   }, []);
 
-  // First-run: prompt for analyst name if not set
+  // First-run: load analyst name from C++ config store (persists to disk)
   useEffect(() => {
-    const saved = localStorage.getItem('shieldtier-analyst-name');
-    if (!saved) {
-      setShowNamePrompt(true);
-    }
+    (async () => {
+      try {
+        const saved = await window.shieldtier.config.get('analystName');
+        if (saved && typeof saved === 'string' && saved.trim()) {
+          setLocalAnalystName(saved.trim());
+        } else {
+          setShowNamePrompt(true);
+        }
+      } catch {
+        setShowNamePrompt(true);
+      }
+    })();
   }, []);
 
   // Restore session on mount: try auth silently in background, load config regardless
@@ -394,7 +402,7 @@ export default function App() {
             onChange={e => setNameInput(e.target.value)}
             onKeyDown={e => {
               if (e.key === 'Enter' && nameInput.trim()) {
-                localStorage.setItem('shieldtier-analyst-name', nameInput.trim());
+                window.shieldtier.config.set('analystName', nameInput.trim());
                 setLocalAnalystName(nameInput.trim());
                 setShowNamePrompt(false);
               }
@@ -406,7 +414,7 @@ export default function App() {
           <button
             onClick={() => {
               if (nameInput.trim()) {
-                localStorage.setItem('shieldtier-analyst-name', nameInput.trim());
+                window.shieldtier.config.set('analystName', nameInput.trim());
                 setLocalAnalystName(nameInput.trim());
                 setShowNamePrompt(false);
               }
