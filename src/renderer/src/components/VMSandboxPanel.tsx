@@ -348,6 +348,14 @@ export default function VMSandboxPanel({ session, files }: VMSandboxPanelProps) 
     }
     try {
       const status = await vm.getQEMUStatus();
+
+      // Windows Sandbox is available — skip QEMU image requirement
+      if (status.windows_sandbox_available) {
+        setQemuReady(true);
+        setView('ready');
+        return;
+      }
+
       if (status.installed) {
         const imgs = await vm.listImages();
         setImages(imgs);

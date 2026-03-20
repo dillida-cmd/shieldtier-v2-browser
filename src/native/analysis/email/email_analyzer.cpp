@@ -7,6 +7,7 @@
 #include <ctime>
 #include <regex>
 #include <sstream>
+#include <set>
 #include <unordered_set>
 
 #ifdef _WIN32
@@ -742,6 +743,31 @@ Result<AnalysisEngineResult> EmailAnalyzer::analyze(const FileBuffer& file) {
     double duration_ms =
         std::chrono::duration<double, std::milli>(end - start).count();
 
+    // ── Scoring: convert findings into a threat score ──
+    int threat_score = 0;
+    int critical_count = 0, high_count = 0, medium_count = 0, low_count = 0;
+
+    for (const auto& f : findings) {
+        switch (f.severity) {
+            case Severity::kCritical: threat_score += 30; critical_count++; break;
+            case Severity::kHigh:     threat_score += 15; high_count++; break;
+            case Severity::kMedium:   threat_score += 8;  medium_count++; break;
+            case Severity::kLow:      threat_score += 3;  low_count++; break;
+            default: threat_score += 1; break;
+        }
+    }
+    if (threat_score > 100) threat_score = 100;
+
+    std::string verdict;
+    if (threat_score >= 60 || critical_count >= 2)
+        verdict = "Malicious";
+    else if (threat_score >= 25 || critical_count >= 1 || high_count >= 2)
+        verdict = "Suspicious";
+    else if (threat_score >= 10)
+        verdict = "Likely Suspicious";
+    else
+        verdict = "Likely Legitimate";
+
     AnalysisEngineResult result;
     result.engine = AnalysisEngine::kEmail;
     result.success = true;
@@ -758,6 +784,14 @@ Result<AnalysisEngineResult> EmailAnalyzer::analyze(const FileBuffer& file) {
         {"url_count", email.urls_in_body.size()},
         {"body_text_length", email.body_text.size()},
         {"body_html_length", email.body_html.size()},
+        {"threat_score", threat_score},
+        {"verdict", verdict},
+        {"finding_counts", {
+            {"critical", critical_count},
+            {"high", high_count},
+            {"medium", medium_count},
+            {"low", low_count},
+        }},
     };
 
     return result;
@@ -810,6 +844,174 @@ std::vector<Finding> EmailAnalyzer::analyze_headers(const ParsedEmail& email) {
         check_auth("spf", "SPF");
         check_auth("dkim", "DKIM");
         check_auth("dmarc", "DMARC");
+
+        // DMARC bestguesspass — not a real pass, treated as weak
+        if (auth_lower.find("dmarc=bestguesspass") != std::string::npos) {
+            findings.push_back({
+                "Email: DMARC Best-Guess Pass (Weak)",
+                "DMARC returned 'bestguesspass' — no actual DMARC policy exists; authentication is unreliable",
+                Severity::kMedium,
+                AnalysisEngine::kEmail,
+                {{"mechanism", "dmarc"}, {"result", "bestguesspass"},
+                 {"mitre_technique", "T1566.001"}},
+            });
+        }
+    }
+
+    // Microsoft SCL (Spam Confidence Level) — 0-9 scale, >=5 is spam, 9 is definite spam
+    std::string scl_header = get_header_value(email.headers, "X-MS-Exchange-Organization-SCL");
+    if (!scl_header.empty()) {
+        try {
+            int scl = std::stoi(trim(scl_header));
+            if (scl >= 7) {
+                findings.push_back({
+                    "Email: Microsoft SCL Score Very High (" + std::to_string(scl) + "/9)",
+                    "Microsoft Exchange classified this email with Spam Confidence Level " +
+                        std::to_string(scl) + " — indicates definite spam/phishing",
+                    Severity::kCritical,
+                    AnalysisEngine::kEmail,
+                    {{"scl_score", scl}, {"mitre_technique", "T1566.001"}},
+                });
+            } else if (scl >= 5) {
+                findings.push_back({
+                    "Email: Microsoft SCL Score High (" + std::to_string(scl) + "/9)",
+                    "Microsoft Exchange classified this email with elevated spam confidence",
+                    Severity::kHigh,
+                    AnalysisEngine::kEmail,
+                    {{"scl_score", scl}, {"mitre_technique", "T1566.001"}},
+                });
+            }
+        } catch (...) {}
+    }
+
+    // SpamAssassin / generic spam score headers
+    for (const auto& h : email.headers) {
+        auto hn = to_lower(h.name);
+        if (hn == "x-spam-score" || hn == "x-spam-level") {
+            try {
+                float spam_score = std::stof(trim(h.value));
+                if (spam_score >= 5.0f) {
+                    findings.push_back({
+                        "Email: Spam Score Elevated (" + h.value + ")",
+                        "External spam filter assigned a high score to this email",
+                        spam_score >= 8.0f ? Severity::kHigh : Severity::kMedium,
+                        AnalysisEngine::kEmail,
+                        {{"header", h.name}, {"score", h.value}},
+                    });
+                }
+            } catch (...) {}
+        }
+        if (hn == "x-spam-flag" && to_lower(trim(h.value)) == "yes") {
+            findings.push_back({
+                "Email: Flagged as Spam by Gateway",
+                "An upstream spam filter flagged this email as spam",
+                Severity::kHigh,
+                AnalysisEngine::kEmail,
+                {{"header", h.name}, {"value", h.value}},
+            });
+        }
+    }
+
+    // Display name spoofing: From display name impersonates a known brand
+    // but actual domain doesn't match (e.g., "PayPal <evil@attacker.com>")
+    {
+        std::string from_lower = to_lower(email.from);
+        std::string from_domain = to_lower(extract_domain(email.from));
+
+        // Extract display name (text before <email@domain>)
+        std::string display_name;
+        auto lt = email.from.find('<');
+        if (lt != std::string::npos) {
+            display_name = to_lower(trim(email.from.substr(0, lt)));
+        }
+
+        static const std::vector<std::pair<std::string, std::string>> brand_domains = {
+            {"paypal", "paypal.com"}, {"microsoft", "microsoft.com"},
+            {"apple", "apple.com"}, {"google", "google.com"},
+            {"amazon", "amazon.com"}, {"netflix", "netflix.com"},
+            {"facebook", "facebook.com"}, {"meta", "meta.com"},
+            {"instagram", "instagram.com"}, {"linkedin", "linkedin.com"},
+            {"twitter", "twitter.com"}, {"coinbase", "coinbase.com"},
+            {"coindesk", "coindesk.com"}, {"binance", "binance.com"},
+            {"wells fargo", "wellsfargo.com"}, {"bank of america", "bankofamerica.com"},
+            {"chase", "chase.com"}, {"citibank", "citibank.com"},
+            {"dropbox", "dropbox.com"}, {"docusign", "docusign.com"},
+            {"dhl", "dhl.com"}, {"fedex", "fedex.com"}, {"ups", "ups.com"},
+            {"usps", "usps.gov"}, {"irs", "irs.gov"},
+            {"ripple", "ripple.com"}, {"stripe", "stripe.com"},
+        };
+
+        for (const auto& [brand, legit_domain] : brand_domains) {
+            if (display_name.find(brand) != std::string::npos &&
+                from_domain.find(legit_domain) == std::string::npos &&
+                !from_domain.empty()) {
+                findings.push_back({
+                    "Email: Display Name Impersonates \"" + brand + "\"",
+                    "From display name contains \"" + brand + "\" but actual domain is " +
+                        from_domain + " (expected " + legit_domain + ")",
+                    Severity::kCritical,
+                    AnalysisEngine::kEmail,
+                    {{"brand", brand}, {"expected_domain", legit_domain},
+                     {"actual_domain", from_domain}, {"mitre_technique", "T1566.001"}},
+                });
+                break;
+            }
+        }
+
+        // Typosquat detection — check if domain looks like a known brand with substitutions
+        static const std::vector<std::pair<char, char>> typo_subs = {
+            {'l', '1'}, {'1', 'l'}, {'o', '0'}, {'0', 'o'},
+            {'i', '1'}, {'i', 'l'}, {'rn', 'm'},
+        };
+        for (const auto& [brand, legit_domain] : brand_domains) {
+            if (from_domain == legit_domain) continue;
+            // Simple Levenshtein distance 1 check
+            if (from_domain.size() == legit_domain.size() && !from_domain.empty()) {
+                int diffs = 0;
+                for (size_t i = 0; i < from_domain.size() && diffs <= 2; ++i) {
+                    if (from_domain[i] != legit_domain[i]) diffs++;
+                }
+                if (diffs == 1) {
+                    findings.push_back({
+                        "Email: Typosquat Domain Detected",
+                        "Sender domain " + from_domain + " is 1 character away from " +
+                            legit_domain + " — likely typosquatting",
+                        Severity::kCritical,
+                        AnalysisEngine::kEmail,
+                        {{"actual_domain", from_domain}, {"similar_to", legit_domain},
+                         {"mitre_technique", "T1566.001"}},
+                    });
+                    break;
+                }
+            }
+        }
+    }
+
+    // Sender uses freemail / bulk email service but claims to be a business
+    {
+        std::string from_domain = to_lower(extract_domain(email.from));
+        static const std::vector<std::string> bulk_services = {
+            "mailgun.net", "sendgrid.net", "mailchimp.com", "constantcontact.com",
+            "sendinblue.com", "mailjet.com", "sparkpost.com", "postmarkapp.com",
+        };
+        std::string sender_domain = to_lower(extract_domain(
+            get_header_value(email.headers, "Sender")));
+        std::string x_mailgun = get_header_value(email.headers, "X-Mailgun-Sending-Ip");
+
+        if (!x_mailgun.empty() || !sender_domain.empty()) {
+            // Check if Sender header domain != From header domain
+            if (!sender_domain.empty() && !from_domain.empty() &&
+                sender_domain != from_domain) {
+                findings.push_back({
+                    "Email: Sender Domain Mismatch",
+                    "Sender header (" + sender_domain + ") differs from From (" +
+                        from_domain + ") — email sent via third-party service",
+                    Severity::kLow,
+                    AnalysisEngine::kEmail,
+                    {{"sender_domain", sender_domain}, {"from_domain", from_domain}},
+                });
+            }
+        }
     }
 
     // Reply-To domain mismatch
@@ -1002,6 +1204,101 @@ std::vector<Finding> EmailAnalyzer::analyze_body(const ParsedEmail& email) {
                 {{"domain", domain}, {"mitre_technique", "T1566.002"}},
             });
             break;
+        }
+    }
+
+    // URL domain differs from sender domain (external links)
+    {
+        std::string from_domain = to_lower(extract_domain(email.from));
+        std::set<std::string> suspicious_url_domains;
+        for (const auto& url : email.urls_in_body) {
+            std::string ud = to_lower(url_domain(url));
+            if (ud.empty() || ud == from_domain) continue;
+            // Skip common legitimate tracking/CDN domains
+            static const std::set<std::string> safe_domains = {
+                "google.com", "googleapis.com", "gstatic.com",
+                "facebook.com", "twitter.com", "linkedin.com",
+                "microsoft.com", "office365.com", "office.com",
+                "amazonaws.com", "cloudfront.net", "cloudflare.com",
+                "w3.org", "schema.org",
+            };
+            bool is_safe = false;
+            for (const auto& sd : safe_domains) {
+                if (ud == sd || ud.size() > sd.size() &&
+                    ud.substr(ud.size() - sd.size() - 1) == "." + sd) {
+                    is_safe = true; break;
+                }
+            }
+            if (!is_safe) suspicious_url_domains.insert(ud);
+        }
+
+        // Flag URLs going to domains with suspicious patterns
+        for (const auto& ud : suspicious_url_domains) {
+            // Domains with numbers mixed in (mail123-ripple.net)
+            bool has_suspicious_pattern = false;
+            static const std::vector<std::string> suspicious_tlds = {
+                ".xyz", ".top", ".buzz", ".click", ".club", ".icu",
+                ".work", ".rest", ".gq", ".cf", ".tk", ".ml",
+            };
+            for (const auto& tld : suspicious_tlds) {
+                if (ud.size() > tld.size() &&
+                    ud.substr(ud.size() - tld.size()) == tld) {
+                    has_suspicious_pattern = true; break;
+                }
+            }
+            // Domain has digits mixed with brand-like words
+            bool has_digits = false, has_alpha = false;
+            for (char c : ud) {
+                if (c >= '0' && c <= '9') has_digits = true;
+                if (c >= 'a' && c <= 'z') has_alpha = true;
+            }
+            if (has_digits && has_alpha && ud.find('-') != std::string::npos) {
+                has_suspicious_pattern = true;
+            }
+
+            if (has_suspicious_pattern) {
+                findings.push_back({
+                    "Email: Suspicious URL Domain Pattern",
+                    "URL points to suspicious domain: " + ud,
+                    Severity::kHigh,
+                    AnalysisEngine::kEmail,
+                    {{"domain", ud}, {"mitre_technique", "T1566.002"}},
+                });
+            }
+        }
+
+        if (suspicious_url_domains.size() > 5) {
+            int ext_count = static_cast<int>(suspicious_url_domains.size());
+            Finding f;
+            f.title = "Email: Many External URL Domains (" + std::to_string(ext_count) + ")";
+            f.description = "Email links to " + std::to_string(ext_count) + " different external domains";
+            f.severity = Severity::kMedium;
+            f.engine = AnalysisEngine::kEmail;
+            f.metadata = {{"external_domain_count", ext_count}};
+            findings.push_back(std::move(f));
+        }
+    }
+
+    // Hex-encoded or base64-encoded URL parameters (obfuscation)
+    for (const auto& url : email.urls_in_body) {
+        // Long hex strings in URL path (common in phishing redirects)
+        if (url.size() > 80) {
+            size_t hex_run = 0;
+            for (char c : url) {
+                if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) hex_run++;
+                else hex_run = 0;
+                if (hex_run > 32) {
+                    findings.push_back({
+                        "Email: Obfuscated URL with Hex Encoding",
+                        "URL contains long hexadecimal string — may encode victim email or tracking data",
+                        Severity::kMedium,
+                        AnalysisEngine::kEmail,
+                        {{"url_preview", url.substr(0, 100)}, {"mitre_technique", "T1566.002"}},
+                    });
+                    break;
+                }
+            }
+            if (hex_run > 32) break;
         }
     }
 
