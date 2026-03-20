@@ -63,6 +63,7 @@ export default function App() {
   const [avatar, setAvatar] = useState(localStorage.getItem('shieldtier-avatar') || 'shield');
   const [localAnalystName, setLocalAnalystName] = useState('');
   const [showNamePrompt, setShowNamePrompt] = useState(false);
+  const [nameLoaded, setNameLoaded] = useState(false);
   const [nameInput, setNameInput] = useState('');
   const [status, setStatus] = useState<string>('No proxy configured');
 
@@ -150,6 +151,7 @@ export default function App() {
       } catch {
         setShowNamePrompt(true);
       }
+      setNameLoaded(true);
     })();
   }, []);
 
@@ -377,6 +379,15 @@ export default function App() {
   }, []);
 
   // First-run name prompt
+  // Wait for name to load before rendering (prevents flash of "Analyst")
+  if (!nameLoaded) {
+    return (
+      <div className="h-screen w-screen bg-[color:var(--st-bg-base)] flex items-center justify-center">
+        <div className="animate-spin w-8 h-8 border-2 border-purple-500/30 border-t-purple-500 rounded-full" />
+      </div>
+    );
+  }
+
   if (showNamePrompt) {
     return (
       <div className="flex items-center justify-center h-screen bg-[color:var(--st-bg-base)]">
