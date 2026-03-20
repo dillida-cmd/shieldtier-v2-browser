@@ -1476,12 +1476,45 @@ json MessageHandler::handle_analyze_email(const json& payload) {
     int score_urgency = 0;
     int score_brand = 0;
 
-    // (1) Engine findings contribute to score
+    // (1) Engine findings contribute to score — weighted by severity
     for (const auto& f : findings_json) {
-        std::string sev = f.value("severity", "info");
-        int pts = (sev == "critical") ? 15 : (sev == "high") ? 8 :
-                  (sev == "medium") ? 4 : (sev == "low") ? 1 : 0;
-        score_content += pts;
+        // severity is stored as enum int in JSON
+        int sev_int = 0;
+        if (f.contains("severity")) {
+            auto& sv = f["severity"];
+            if (sv.is_number()) sev_int = sv.get<int>();
+            else if (sv.is_string()) {
+                auto s = sv.get<std::string>();
+                if (s == "critical") sev_int = 4;
+                else if (s == "high") sev_int = 3;
+                else if (s == "medium") sev_int = 2;
+                else if (s == "low") sev_int = 1;
+            }
+        }
+        std::string title = f.value("title", "");
+        int pts = 0;
+        if (sev_int >= 4) pts = 25;
+        else if (sev_int == 3) pts = 12;
+        else if (sev_int == 2) pts = 6;
+        else if (sev_int == 1) pts = 2;
+
+        // Route findings to the right category bucket
+        if (title.find("SCL") != std::string::npos ||
+            title.find("Spam") != std::string::npos)
+            score_auth += pts;
+        else if (title.find("Impersonat") != std::string::npos ||
+                 title.find("Typosquat") != std::string::npos ||
+                 title.find("Display Name") != std::string::npos)
+            score_brand += pts;
+        else if (title.find("URL") != std::string::npos ||
+                 title.find("Hex") != std::string::npos)
+            score_links += pts;
+        else if (title.find("DMARC") != std::string::npos ||
+                 title.find("SPF") != std::string::npos ||
+                 title.find("DKIM") != std::string::npos)
+            score_auth += pts;
+        else
+            score_content += pts;
     }
 
     // (2) Sender domain mismatch: display name suggests institution but uses freemail
