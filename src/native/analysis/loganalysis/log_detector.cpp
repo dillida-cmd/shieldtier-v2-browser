@@ -99,6 +99,12 @@ std::string truncate(const std::string& s, size_t max_len) {
     return s.substr(0, max_len) + "...";
 }
 
+// Helper: check if a lowered command matches two substrings (both must be present)
+bool has_dual(const std::string& lower_cmd, const char* a, const char* b) {
+    return lower_cmd.find(a) != std::string::npos &&
+           lower_cmd.find(b) != std::string::npos;
+}
+
 }  // namespace
 
 LogDetector::LogDetector() = default;
@@ -120,6 +126,15 @@ std::vector<Finding> LogDetector::detect(const std::vector<NormalizedEvent>& eve
 
     auto sc = detect_suspicious_commands(events);
     findings.insert(findings.end(), sc.begin(), sc.end());
+
+    auto am = detect_account_manipulation(events);
+    findings.insert(findings.end(), am.begin(), am.end());
+
+    auto lc = detect_log_clearing(events);
+    findings.insert(findings.end(), lc.begin(), lc.end());
+
+    auto rdp = detect_rdp_abuse(events);
+    findings.insert(findings.end(), rdp.begin(), rdp.end());
 
     return findings;
 }
@@ -376,6 +391,13 @@ std::vector<Finding> LogDetector::detect_suspicious_commands(
     const std::vector<NormalizedEvent>& events) {
     std::vector<Finding> findings;
 
+    // Security tool names that attackers commonly kill
+    static const char* security_tools[] = {
+        "msmpeng", "mssense", "savservice", "avp", "avgnt", "bdagent",
+        "ekrn", "mbam", "mcshield", "windefend", "carbonblack", "cb",
+        "crowdstrike", "csfalcon", "cylance", "sentinelagent", "tanium",
+    };
+
     for (const auto& event : events) {
         std::string cmd = json_string(event.fields, "_command");
         if (cmd.empty()) cmd = event.message;
@@ -385,7 +407,9 @@ std::vector<Finding> LogDetector::detect_suspicious_commands(
         std::string user = json_string(event.fields, "_user");
         std::string cmd_truncated = truncate(cmd, 200);
 
-        // PowerShell encoded commands
+        // ---------------------------------------------------------------
+        // PowerShell encoded commands (T1059.001)
+        // ---------------------------------------------------------------
         if (lower_cmd.find("powershell") != std::string::npos ||
             lower_cmd.find("pwsh") != std::string::npos) {
             if (lower_cmd.find("-enc") != std::string::npos ||
@@ -404,7 +428,31 @@ std::vector<Finding> LogDetector::detect_suspicious_commands(
             }
         }
 
-        // certutil decode/urlcache
+        // ---------------------------------------------------------------
+        // PowerShell download cradles (T1059.001)
+        // ---------------------------------------------------------------
+        if (has_dual(lower_cmd, "powershell", "downloadstring") ||
+            has_dual(lower_cmd, "powershell", "downloadfile") ||
+            has_dual(lower_cmd, "powershell", "downloaddata") ||
+            has_dual(lower_cmd, "iex", "webclient") ||
+            has_dual(lower_cmd, "invoke-expression", "webclient") ||
+            has_dual(lower_cmd, "invoke-webrequest", "outfile") ||
+            has_dual(lower_cmd, "start-bitstransfer", "http")) {
+            findings.push_back({
+                "Log Detection: PowerShell Download Cradle",
+                "PowerShell download cradle detected — downloading and executing remote content",
+                Severity::kCritical,
+                AnalysisEngine::kLogAnalysis,
+                {{"command", cmd_truncated},
+                 {"user", user},
+                 {"mitre_technique", "T1059.001"}},
+            });
+            continue;
+        }
+
+        // ---------------------------------------------------------------
+        // certutil decode/urlcache (T1140)
+        // ---------------------------------------------------------------
         if (lower_cmd.find("certutil") != std::string::npos &&
             (lower_cmd.find("-decode") != std::string::npos ||
              lower_cmd.find("-urlcache") != std::string::npos)) {
@@ -420,9 +468,10 @@ std::vector<Finding> LogDetector::detect_suspicious_commands(
             continue;
         }
 
-        // bitsadmin transfer
-        if (lower_cmd.find("bitsadmin") != std::string::npos &&
-            lower_cmd.find("/transfer") != std::string::npos) {
+        // ---------------------------------------------------------------
+        // bitsadmin transfer (T1197)
+        // ---------------------------------------------------------------
+        if (has_dual(lower_cmd, "bitsadmin", "/transfer")) {
             findings.push_back({
                 "Log Detection: BITSAdmin File Transfer",
                 "BITSAdmin used for file transfer — potential download of malicious payload",
@@ -435,27 +484,336 @@ std::vector<Finding> LogDetector::detect_suspicious_commands(
             continue;
         }
 
-        // LOLBins with suspicious arguments
-        bool has_lolbin = lower_cmd.find("mshta") != std::string::npos ||
-                          lower_cmd.find("rundll32") != std::string::npos ||
-                          lower_cmd.find("regsvr32") != std::string::npos;
-        bool has_lolbin_arg = lower_cmd.find("http") != std::string::npos ||
-                              lower_cmd.find("javascript") != std::string::npos ||
-                              lower_cmd.find("script") != std::string::npos;
-        if (has_lolbin && has_lolbin_arg) {
+        // ---------------------------------------------------------------
+        // MSHTA abuse (T1218.005)
+        // ---------------------------------------------------------------
+        if (lower_cmd.find("mshta") != std::string::npos &&
+            (lower_cmd.find("javascript") != std::string::npos ||
+             lower_cmd.find("vbscript") != std::string::npos ||
+             lower_cmd.find("http") != std::string::npos)) {
             findings.push_back({
-                "Log Detection: LOLBin Execution with Suspicious Arguments",
-                "Living-off-the-land binary executed with script/URL arguments",
+                "Log Detection: MSHTA Script Execution",
+                "MSHTA executed with script content — LOLBin proxy execution technique",
                 Severity::kHigh,
                 AnalysisEngine::kLogAnalysis,
                 {{"command", cmd_truncated},
                  {"user", user},
-                 {"mitre_technique", "T1218"}},
+                 {"mitre_technique", "T1218.005"}},
             });
             continue;
         }
 
-        // Event log clearing
+        // ---------------------------------------------------------------
+        // Regsvr32 remote scriptlet (T1218.010)
+        // ---------------------------------------------------------------
+        if (lower_cmd.find("regsvr32") != std::string::npos &&
+            (lower_cmd.find("/i:http") != std::string::npos ||
+             has_dual(lower_cmd, "/s", "/n"))) {
+            findings.push_back({
+                "Log Detection: Regsvr32 Scriptlet Execution",
+                "Regsvr32 invoked with remote scriptlet — Squiblydoo/Squiblytwo technique",
+                Severity::kHigh,
+                AnalysisEngine::kLogAnalysis,
+                {{"command", cmd_truncated},
+                 {"user", user},
+                 {"mitre_technique", "T1218.010"}},
+            });
+            continue;
+        }
+
+        // ---------------------------------------------------------------
+        // Rundll32 abuse (T1218.011)
+        // ---------------------------------------------------------------
+        if (lower_cmd.find("rundll32") != std::string::npos &&
+            (lower_cmd.find("javascript") != std::string::npos ||
+             lower_cmd.find("shell32") != std::string::npos ||
+             lower_cmd.find("http") != std::string::npos)) {
+            findings.push_back({
+                "Log Detection: Rundll32 Abuse",
+                "Rundll32 invoked with suspicious arguments — potential proxy execution",
+                Severity::kHigh,
+                AnalysisEngine::kLogAnalysis,
+                {{"command", cmd_truncated},
+                 {"user", user},
+                 {"mitre_technique", "T1218.011"}},
+            });
+            continue;
+        }
+
+        // ---------------------------------------------------------------
+        // WMIC remote execution (T1047)
+        // ---------------------------------------------------------------
+        if (has_dual(lower_cmd, "wmic", "/node:")) {
+            findings.push_back({
+                "Log Detection: WMIC Remote Execution",
+                "WMIC used with /node: parameter — remote process execution on another host",
+                Severity::kHigh,
+                AnalysisEngine::kLogAnalysis,
+                {{"command", cmd_truncated},
+                 {"user", user},
+                 {"mitre_technique", "T1047"}},
+            });
+            continue;
+        }
+
+        // ---------------------------------------------------------------
+        // Network share mounting (T1021.002)
+        // ---------------------------------------------------------------
+        if (has_dual(lower_cmd, "net use", "\\\\")) {
+            findings.push_back({
+                "Log Detection: Network Share Mounting",
+                "Network share mounted via net use — potential lateral movement or data staging",
+                Severity::kMedium,
+                AnalysisEngine::kLogAnalysis,
+                {{"command", cmd_truncated},
+                 {"user", user},
+                 {"mitre_technique", "T1021.002"}},
+            });
+            continue;
+        }
+
+        // ---------------------------------------------------------------
+        // Active Directory reconnaissance (T1482 / T1018)
+        // ---------------------------------------------------------------
+        if (has_dual(lower_cmd, "nltest", "/domain_trusts") ||
+            lower_cmd.find("dsquery") != std::string::npos ||
+            lower_cmd.find("ldapsearch") != std::string::npos) {
+            findings.push_back({
+                "Log Detection: Active Directory Reconnaissance",
+                "AD/LDAP reconnaissance command detected — domain trust or object enumeration",
+                Severity::kMedium,
+                AnalysisEngine::kLogAnalysis,
+                {{"command", cmd_truncated},
+                 {"user", user},
+                 {"mitre_technique", "T1482"}},
+            });
+            continue;
+        }
+
+        // ---------------------------------------------------------------
+        // Credential dumping tools (T1003)
+        // ---------------------------------------------------------------
+        if (lower_cmd.find("mimikatz") != std::string::npos ||
+            lower_cmd.find("sekurlsa") != std::string::npos ||
+            lower_cmd.find("kerberos::") != std::string::npos ||
+            lower_cmd.find("lsadump::") != std::string::npos ||
+            lower_cmd.find("invoke-mimikatz") != std::string::npos) {
+            findings.push_back({
+                "Log Detection: Credential Dumping Tool",
+                "Credential dumping tool or module detected — Mimikatz or related tooling",
+                Severity::kCritical,
+                AnalysisEngine::kLogAnalysis,
+                {{"command", cmd_truncated},
+                 {"user", user},
+                 {"mitre_technique", "T1003"}},
+            });
+            continue;
+        }
+
+        // ---------------------------------------------------------------
+        // Lateral movement tools (T1570)
+        // ---------------------------------------------------------------
+        if (lower_cmd.find("psexec") != std::string::npos ||
+            lower_cmd.find("wmiexec") != std::string::npos ||
+            lower_cmd.find("smbexec") != std::string::npos ||
+            lower_cmd.find("atexec") != std::string::npos ||
+            lower_cmd.find("dcomexec") != std::string::npos) {
+            findings.push_back({
+                "Log Detection: Lateral Movement Tool",
+                "Known lateral movement tool detected — remote execution framework",
+                Severity::kCritical,
+                AnalysisEngine::kLogAnalysis,
+                {{"command", cmd_truncated},
+                 {"user", user},
+                 {"mitre_technique", "T1570"}},
+            });
+            continue;
+        }
+
+        // ---------------------------------------------------------------
+        // Volume shadow copy deletion — ransomware (T1490)
+        // ---------------------------------------------------------------
+        if (has_dual(lower_cmd, "vssadmin", "delete shadows") ||
+            has_dual(lower_cmd, "wmic", "shadowcopy delete")) {
+            findings.push_back({
+                "Log Detection: Volume Shadow Copy Deletion",
+                "Shadow copies being deleted — critical ransomware indicator",
+                Severity::kCritical,
+                AnalysisEngine::kLogAnalysis,
+                {{"command", cmd_truncated},
+                 {"user", user},
+                 {"mitre_technique", "T1490"}},
+            });
+            continue;
+        }
+
+        // ---------------------------------------------------------------
+        // Boot config tampering — recovery disable (T1490)
+        // ---------------------------------------------------------------
+        if (has_dual(lower_cmd, "bcdedit", "/set") &&
+            (lower_cmd.find("recoveryenabled no") != std::string::npos ||
+             lower_cmd.find("bootstatuspolicy ignoreallfailures") != std::string::npos)) {
+            findings.push_back({
+                "Log Detection: Recovery Options Disabled",
+                "Boot configuration modified to disable recovery — ransomware precursor",
+                Severity::kCritical,
+                AnalysisEngine::kLogAnalysis,
+                {{"command", cmd_truncated},
+                 {"user", user},
+                 {"mitre_technique", "T1490"}},
+            });
+            continue;
+        }
+
+        // ---------------------------------------------------------------
+        // Hidden file/directory attributes (T1564.001)
+        // ---------------------------------------------------------------
+        if (lower_cmd.find("attrib") != std::string::npos &&
+            lower_cmd.find("+h") != std::string::npos &&
+            lower_cmd.find("+s") != std::string::npos) {
+            findings.push_back({
+                "Log Detection: Hidden File Attribute Set",
+                "File attributes set to hidden+system — attempt to conceal files on disk",
+                Severity::kMedium,
+                AnalysisEngine::kLogAnalysis,
+                {{"command", cmd_truncated},
+                 {"user", user},
+                 {"mitre_technique", "T1564.001"}},
+            });
+            continue;
+        }
+
+        // ---------------------------------------------------------------
+        // Permission weakening via icacls (T1222.001)
+        // ---------------------------------------------------------------
+        if (lower_cmd.find("icacls") != std::string::npos &&
+            lower_cmd.find("grant") != std::string::npos &&
+            lower_cmd.find("everyone") != std::string::npos) {
+            findings.push_back({
+                "Log Detection: Permission Weakening",
+                "File/directory permissions granted to Everyone — weakening access controls",
+                Severity::kHigh,
+                AnalysisEngine::kLogAnalysis,
+                {{"command", cmd_truncated},
+                 {"user", user},
+                 {"mitre_technique", "T1222.001"}},
+            });
+            continue;
+        }
+
+        // ---------------------------------------------------------------
+        // Firewall disable (T1562.004)
+        // ---------------------------------------------------------------
+        if ((lower_cmd.find("netsh") != std::string::npos &&
+             lower_cmd.find("firewall") != std::string::npos &&
+             lower_cmd.find("disable") != std::string::npos) ||
+            (lower_cmd.find("netsh") != std::string::npos &&
+             lower_cmd.find("advfirewall") != std::string::npos &&
+             lower_cmd.find("off") != std::string::npos)) {
+            findings.push_back({
+                "Log Detection: Firewall Disabled",
+                "Windows Firewall being disabled via netsh — defense evasion indicator",
+                Severity::kCritical,
+                AnalysisEngine::kLogAnalysis,
+                {{"command", cmd_truncated},
+                 {"user", user},
+                 {"mitre_technique", "T1562.004"}},
+            });
+            continue;
+        }
+
+        // ---------------------------------------------------------------
+        // Disable Windows Defender via registry (T1562.001)
+        // ---------------------------------------------------------------
+        if (lower_cmd.find("reg") != std::string::npos &&
+            lower_cmd.find("add") != std::string::npos &&
+            lower_cmd.find("disableantispyware") != std::string::npos) {
+            findings.push_back({
+                "Log Detection: Windows Defender Disabled via Registry",
+                "Registry key set to disable Windows Defender — critical defense evasion",
+                Severity::kCritical,
+                AnalysisEngine::kLogAnalysis,
+                {{"command", cmd_truncated},
+                 {"user", user},
+                 {"mitre_technique", "T1562.001"}},
+            });
+            continue;
+        }
+
+        // ---------------------------------------------------------------
+        // Taskkill targeting security tools (T1562.001)
+        // ---------------------------------------------------------------
+        if (lower_cmd.find("taskkill") != std::string::npos &&
+            lower_cmd.find("/f") != std::string::npos) {
+            for (const char* tool : security_tools) {
+                if (lower_cmd.find(tool) != std::string::npos) {
+                    findings.push_back({
+                        "Log Detection: Security Tool Terminated",
+                        "Security tool process forcefully killed — defense evasion attempt",
+                        Severity::kCritical,
+                        AnalysisEngine::kLogAnalysis,
+                        {{"command", cmd_truncated},
+                         {"user", user},
+                         {"killed_tool", tool},
+                         {"mitre_technique", "T1562.001"}},
+                    });
+                    break;
+                }
+            }
+            // Even if no tool matched, continue to check other patterns below
+        }
+
+        // ---------------------------------------------------------------
+        // Privilege enumeration — whoami /priv (T1033)
+        // ---------------------------------------------------------------
+        if (has_dual(lower_cmd, "whoami", "/priv")) {
+            findings.push_back({
+                "Log Detection: Privilege Enumeration",
+                "whoami /priv executed — enumerating current user privileges",
+                Severity::kLow,
+                AnalysisEngine::kLogAnalysis,
+                {{"command", cmd_truncated},
+                 {"user", user},
+                 {"mitre_technique", "T1033"}},
+            });
+            continue;
+        }
+
+        // ---------------------------------------------------------------
+        // Credential enumeration — cmdkey /list (T1555.004)
+        // ---------------------------------------------------------------
+        if (has_dual(lower_cmd, "cmdkey", "/list")) {
+            findings.push_back({
+                "Log Detection: Stored Credential Enumeration",
+                "cmdkey /list executed — enumerating stored Windows credentials",
+                Severity::kMedium,
+                AnalysisEngine::kLogAnalysis,
+                {{"command", cmd_truncated},
+                 {"user", user},
+                 {"mitre_technique", "T1555.004"}},
+            });
+            continue;
+        }
+
+        // ---------------------------------------------------------------
+        // Kerberos ticket listing — klist (T1558)
+        // ---------------------------------------------------------------
+        if (contains_word(lower_cmd, "klist")) {
+            findings.push_back({
+                "Log Detection: Kerberos Ticket Enumeration",
+                "klist executed — enumerating cached Kerberos tickets",
+                Severity::kLow,
+                AnalysisEngine::kLogAnalysis,
+                {{"command", cmd_truncated},
+                 {"user", user},
+                 {"mitre_technique", "T1558"}},
+            });
+            continue;
+        }
+
+        // ---------------------------------------------------------------
+        // Event log clearing via wevtutil (T1070.001)
+        // ---------------------------------------------------------------
         if (lower_cmd.find("wevtutil") != std::string::npos &&
             contains_word(lower_cmd, "cl")) {
             findings.push_back({
@@ -470,9 +828,10 @@ std::vector<Finding> LogDetector::detect_suspicious_commands(
             continue;
         }
 
-        // Scheduled task creation
-        if (lower_cmd.find("schtasks") != std::string::npos &&
-            lower_cmd.find("/create") != std::string::npos) {
+        // ---------------------------------------------------------------
+        // Scheduled task creation (T1053.005)
+        // ---------------------------------------------------------------
+        if (has_dual(lower_cmd, "schtasks", "/create")) {
             findings.push_back({
                 "Log Detection: Scheduled Task Creation",
                 "Scheduled task created via command line — potential persistence mechanism",
@@ -485,7 +844,9 @@ std::vector<Finding> LogDetector::detect_suspicious_commands(
             continue;
         }
 
-        // Service creation
+        // ---------------------------------------------------------------
+        // Service creation (T1543.003)
+        // ---------------------------------------------------------------
         if (contains_word(lower_cmd, "sc") &&
             lower_cmd.find("create") != std::string::npos &&
             lower_cmd.find("binpath") != std::string::npos) {
@@ -501,7 +862,9 @@ std::vector<Finding> LogDetector::detect_suspicious_commands(
             continue;
         }
 
-        // Registry run key modification
+        // ---------------------------------------------------------------
+        // Registry run key modification (T1547.001)
+        // ---------------------------------------------------------------
         if (contains_word(lower_cmd, "reg") &&
             lower_cmd.find("add") != std::string::npos &&
             lower_cmd.find("run") != std::string::npos) {
@@ -515,6 +878,314 @@ std::vector<Finding> LogDetector::detect_suspicious_commands(
                  {"mitre_technique", "T1547.001"}},
             });
             continue;
+        }
+    }
+
+    return findings;
+}
+
+// ---------------------------------------------------------------------------
+// Account manipulation detection (T1136 / T1098)
+// ---------------------------------------------------------------------------
+std::vector<Finding> LogDetector::detect_account_manipulation(
+    const std::vector<NormalizedEvent>& events) {
+    std::vector<Finding> findings;
+
+    // Patterns: each entry is {needle1, needle2, description, severity, mitre}
+    static const struct {
+        const char* a;
+        const char* b;
+        const char* description;
+        Severity severity;
+        const char* mitre;
+    } account_patterns[] = {
+        {"net user", "/add",
+         "Local user account created via net user /add",
+         Severity::kHigh, "T1136.001"},
+        {"net localgroup", "administrators /add",
+         "User added to local Administrators group",
+         Severity::kCritical, "T1098"},
+        {"net group", "domain admins",
+         "User added to Domain Admins group — critical privilege escalation",
+         Severity::kCritical, "T1098"},
+        {"add-localgroupmember", "administrators",
+         "User added to local Administrators via PowerShell",
+         Severity::kCritical, "T1098"},
+        {"new-localuser", nullptr,
+         "Local user account created via PowerShell New-LocalUser",
+         Severity::kHigh, "T1136.001"},
+    };
+
+    for (const auto& event : events) {
+        std::string cmd = json_string(event.fields, "_command");
+        if (cmd.empty()) cmd = event.message;
+        if (cmd.empty()) continue;
+
+        std::string lower_cmd = to_lower(cmd);
+        std::string user = json_string(event.fields, "_user");
+        std::string cmd_truncated = truncate(cmd, 200);
+
+        // Check event IDs for Windows Security log account events
+        int64_t event_id = json_int64(event.fields, "_event_id");
+        if (event_id == 0) event_id = json_int64(event.fields, "EventID");
+
+        // Event ID 4720: A user account was created
+        if (event_id == 4720) {
+            findings.push_back({
+                "Log Detection: User Account Created",
+                "Windows Security event 4720 — a new user account was created",
+                Severity::kHigh,
+                AnalysisEngine::kLogAnalysis,
+                {{"event_id", event_id},
+                 {"user", user},
+                 {"evidence", truncate(event.message, 200)},
+                 {"mitre_technique", "T1136.001"}},
+            });
+            continue;
+        }
+
+        // Event ID 4728/4732/4756: Member added to security-enabled group
+        if (event_id == 4728 || event_id == 4732 || event_id == 4756) {
+            findings.push_back({
+                "Log Detection: Group Membership Modified",
+                "Windows Security event " + std::to_string(event_id) +
+                    " — member added to security-enabled group",
+                Severity::kHigh,
+                AnalysisEngine::kLogAnalysis,
+                {{"event_id", event_id},
+                 {"user", user},
+                 {"evidence", truncate(event.message, 200)},
+                 {"mitre_technique", "T1098"}},
+            });
+            continue;
+        }
+
+        for (const auto& pat : account_patterns) {
+            bool match = false;
+            if (pat.b == nullptr) {
+                match = lower_cmd.find(pat.a) != std::string::npos;
+            } else {
+                match = lower_cmd.find(pat.a) != std::string::npos &&
+                        lower_cmd.find(pat.b) != std::string::npos;
+            }
+            if (match) {
+                findings.push_back({
+                    "Log Detection: Account Manipulation",
+                    std::string(pat.description),
+                    pat.severity,
+                    AnalysisEngine::kLogAnalysis,
+                    {{"command", cmd_truncated},
+                     {"user", user},
+                     {"mitre_technique", pat.mitre}},
+                });
+                break;
+            }
+        }
+    }
+
+    return findings;
+}
+
+// ---------------------------------------------------------------------------
+// Log clearing detection (T1070.001)
+// ---------------------------------------------------------------------------
+std::vector<Finding> LogDetector::detect_log_clearing(
+    const std::vector<NormalizedEvent>& events) {
+    std::vector<Finding> findings;
+
+    for (const auto& event : events) {
+        std::string user = json_string(event.fields, "_user");
+
+        // Check event IDs
+        int64_t event_id = json_int64(event.fields, "_event_id");
+        if (event_id == 0) event_id = json_int64(event.fields, "EventID");
+
+        // Event ID 1102: The audit log was cleared
+        if (event_id == 1102) {
+            findings.push_back({
+                "Log Detection: Audit Log Cleared",
+                "Windows Security event 1102 — the audit log was cleared",
+                Severity::kCritical,
+                AnalysisEngine::kLogAnalysis,
+                {{"event_id", event_id},
+                 {"user", user},
+                 {"evidence", truncate(event.message, 200)},
+                 {"mitre_technique", "T1070.001"}},
+            });
+            continue;
+        }
+
+        // Event ID 104: System log cleared
+        if (event_id == 104) {
+            findings.push_back({
+                "Log Detection: System Log Cleared",
+                "Windows System event 104 — a system event log was cleared",
+                Severity::kCritical,
+                AnalysisEngine::kLogAnalysis,
+                {{"event_id", event_id},
+                 {"user", user},
+                 {"evidence", truncate(event.message, 200)},
+                 {"mitre_technique", "T1070.001"}},
+            });
+            continue;
+        }
+
+        // Check command-based log clearing
+        std::string cmd = json_string(event.fields, "_command");
+        if (cmd.empty()) cmd = event.message;
+        if (cmd.empty()) continue;
+
+        std::string lower_cmd = to_lower(cmd);
+        std::string cmd_truncated = truncate(cmd, 200);
+
+        // wevtutil cl (command-based clearing, also caught in suspicious_commands
+        // but included here for completeness in the dedicated detector)
+        if (lower_cmd.find("wevtutil") != std::string::npos &&
+            contains_word(lower_cmd, "cl")) {
+            findings.push_back({
+                "Log Detection: Event Log Clearing via wevtutil",
+                "Windows event logs cleared using wevtutil cl — anti-forensics",
+                Severity::kCritical,
+                AnalysisEngine::kLogAnalysis,
+                {{"command", cmd_truncated},
+                 {"user", user},
+                 {"mitre_technique", "T1070.001"}},
+            });
+            continue;
+        }
+
+        // PowerShell Clear-EventLog
+        if (lower_cmd.find("clear-eventlog") != std::string::npos) {
+            findings.push_back({
+                "Log Detection: Event Log Clearing via PowerShell",
+                "Event log cleared using PowerShell Clear-EventLog cmdlet — anti-forensics",
+                Severity::kCritical,
+                AnalysisEngine::kLogAnalysis,
+                {{"command", cmd_truncated},
+                 {"user", user},
+                 {"mitre_technique", "T1070.001"}},
+            });
+            continue;
+        }
+
+        // PowerShell Remove-EventLog
+        if (lower_cmd.find("remove-eventlog") != std::string::npos) {
+            findings.push_back({
+                "Log Detection: Event Log Removal via PowerShell",
+                "Event log removed using PowerShell Remove-EventLog cmdlet — anti-forensics",
+                Severity::kCritical,
+                AnalysisEngine::kLogAnalysis,
+                {{"command", cmd_truncated},
+                 {"user", user},
+                 {"mitre_technique", "T1070.001"}},
+            });
+            continue;
+        }
+    }
+
+    return findings;
+}
+
+// ---------------------------------------------------------------------------
+// RDP abuse detection (T1021.001)
+// ---------------------------------------------------------------------------
+std::vector<Finding> LogDetector::detect_rdp_abuse(
+    const std::vector<NormalizedEvent>& events) {
+    std::vector<Finding> findings;
+
+    // Track RDP logon sources per target host: target -> set<source_ip>
+    struct RdpInfo {
+        std::unordered_set<std::string> source_ips;
+        int64_t first_ts = INT64_MAX;
+        int64_t last_ts = 0;
+        int count = 0;
+    };
+    std::unordered_map<std::string, RdpInfo> rdp_by_target;
+
+    for (const auto& event : events) {
+        int64_t event_id = json_int64(event.fields, "_event_id");
+        if (event_id == 0) event_id = json_int64(event.fields, "EventID");
+
+        // Event ID 4624: successful logon
+        if (event_id != 4624) continue;
+
+        // Check for logon type 10 (RemoteInteractive / RDP)
+        std::string logon_type = json_string(event.fields, "LogonType");
+        if (logon_type.empty()) logon_type = json_string(event.fields, "_logon_type");
+        int64_t logon_type_num = 0;
+        if (!logon_type.empty()) {
+            try { logon_type_num = std::stoll(logon_type); } catch (...) {}
+        }
+        if (logon_type_num == 0) {
+            logon_type_num = json_int64(event.fields, "LogonType");
+        }
+
+        if (logon_type_num != 10) continue;
+
+        // Extract source IP of the RDP session
+        std::string src_ip = json_string(event.fields, "_src_ip");
+        if (src_ip.empty()) src_ip = json_string(event.fields, "IpAddress");
+        if (src_ip.empty()) src_ip = json_string(event.fields, "client_ip");
+        if (src_ip.empty()) continue;
+
+        // Target is the machine name or destination
+        std::string target = json_string(event.fields, "_dst_ip");
+        if (target.empty()) target = json_string(event.fields, "WorkstationName");
+        if (target.empty()) target = event.source;
+        if (target.empty()) target = "<unknown>";
+
+        auto& info = rdp_by_target[target];
+        info.source_ips.insert(src_ip);
+        info.count++;
+        if (event.timestamp < info.first_ts) info.first_ts = event.timestamp;
+        if (event.timestamp > info.last_ts) info.last_ts = event.timestamp;
+    }
+
+    for (const auto& [target, info] : rdp_by_target) {
+        // Multiple distinct source IPs connecting via RDP to same target
+        if (info.source_ips.size() >= 3) {
+            json src_list = json::array();
+            for (const auto& ip : info.source_ips) {
+                src_list.push_back(ip);
+            }
+
+            int64_t window_sec = (info.last_ts > info.first_ts)
+                                     ? (info.last_ts - info.first_ts) / 1000
+                                     : 0;
+
+            findings.push_back({
+                "Log Detection: Multiple RDP Sources to Single Host",
+                "Host " + target + " received RDP connections from " +
+                    std::to_string(info.source_ips.size()) +
+                    " distinct source IPs — possible compromised jump box or lateral movement",
+                Severity::kHigh,
+                AnalysisEngine::kLogAnalysis,
+                {{"target_host", target},
+                 {"source_count", info.source_ips.size()},
+                 {"source_ips", src_list},
+                 {"total_rdp_logons", info.count},
+                 {"time_window_sec", window_sec},
+                 {"mitre_technique", "T1021.001"}},
+            });
+        }
+
+        // High volume RDP logons (brute force success or automated lateral movement)
+        if (info.count >= 10) {
+            int64_t window_sec = (info.last_ts > info.first_ts)
+                                     ? (info.last_ts - info.first_ts) / 1000
+                                     : 0;
+
+            findings.push_back({
+                "Log Detection: High Volume RDP Logons",
+                "Host " + target + " received " + std::to_string(info.count) +
+                    " RDP logon events — possible automated lateral movement",
+                (info.count >= 20) ? Severity::kCritical : Severity::kHigh,
+                AnalysisEngine::kLogAnalysis,
+                {{"target_host", target},
+                 {"logon_count", info.count},
+                 {"time_window_sec", window_sec},
+                 {"mitre_technique", "T1021.001"}},
+            });
         }
     }
 

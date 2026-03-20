@@ -216,6 +216,101 @@ std::vector<std::string> PeAnalyzer::check_suspicious_imports(
             "Network download pattern: InternetOpen + URLDownloadToFile");
     }
 
+    // Clipboard theft
+    if (func_names.count("OpenClipboard") &&
+        func_names.count("GetClipboardData")) {
+        suspicious.push_back("Clipboard theft: OpenClipboard + GetClipboardData (T1115)");
+    }
+
+    // Screen capture
+    if (func_names.count("BitBlt") &&
+        (func_names.count("GetDC") || func_names.count("GetWindowDC")) &&
+        func_names.count("CreateCompatibleBitmap")) {
+        suspicious.push_back("Screen capture: BitBlt + GetDC + CreateCompatibleBitmap (T1113)");
+    }
+
+    // APC injection
+    if (func_names.count("VirtualAllocEx") &&
+        func_names.count("WriteProcessMemory") &&
+        func_names.count("QueueUserAPC")) {
+        suspicious.push_back("APC injection: VirtualAllocEx + WriteProcessMemory + QueueUserAPC (T1055.004)");
+    }
+
+    // Process hollowing
+    if ((func_names.count("CreateProcessA") || func_names.count("CreateProcessW")) &&
+        func_names.count("NtUnmapViewOfSection") &&
+        func_names.count("WriteProcessMemory")) {
+        suspicious.push_back("Process hollowing: CreateProcess + NtUnmapViewOfSection + WriteProcessMemory (T1055.012)");
+    }
+
+    // Token manipulation / privilege escalation
+    if (func_names.count("OpenProcessToken") &&
+        (func_names.count("AdjustTokenPrivileges") ||
+         func_names.count("DuplicateTokenEx") ||
+         func_names.count("ImpersonateLoggedOnUser"))) {
+        suspicious.push_back("Token manipulation: OpenProcessToken + privilege escalation APIs (T1134)");
+    }
+
+    // Service creation for persistence
+    if (func_names.count("OpenSCManagerA") || func_names.count("OpenSCManagerW")) {
+        if (func_names.count("CreateServiceA") || func_names.count("CreateServiceW")) {
+            suspicious.push_back("Service persistence: OpenSCManager + CreateService (T1543.003)");
+        }
+    }
+
+    // Crypto API usage (ransomware indicator)
+    if ((func_names.count("CryptEncrypt") || func_names.count("BCryptEncrypt")) &&
+        (func_names.count("FindFirstFileA") || func_names.count("FindFirstFileW")) &&
+        (func_names.count("DeleteFileA") || func_names.count("DeleteFileW"))) {
+        suspicious.push_back("Ransomware pattern: CryptEncrypt + FindFirstFile + DeleteFile (T1486)");
+    }
+
+    // DNS resolution + raw socket (C2 indicator)
+    if (func_names.count("getaddrinfo") &&
+        (func_names.count("socket") || func_names.count("WSASocketA") || func_names.count("WSASocketW")) &&
+        (func_names.count("connect") || func_names.count("WSAConnect"))) {
+        suspicious.push_back("Network C2 pattern: DNS resolution + socket + connect (T1071)");
+    }
+
+    // LSASS credential dumping
+    if (func_names.count("OpenProcess") &&
+        func_names.count("ReadProcessMemory") &&
+        (func_names.count("MiniDumpWriteDump") || func_names.count("NtReadVirtualMemory"))) {
+        suspicious.push_back("Credential dump: OpenProcess + ReadProcessMemory + MiniDump (T1003.001)");
+    }
+
+    // Dynamic API resolution (evasion)
+    if (func_names.count("GetProcAddress") &&
+        func_names.count("LoadLibraryA") || func_names.count("LoadLibraryW")) {
+        if (func_names.size() < 15) {  // Few static imports = likely resolves dynamically
+            suspicious.push_back("Dynamic API resolution: GetProcAddress + LoadLibrary with few imports (evasion)");
+        }
+    }
+
+    // WMI execution
+    if (func_names.count("CoCreateInstance") &&
+        func_names.count("CoInitializeEx")) {
+        // COM usage alone is common, but combined with process creation it's suspicious
+        if (func_names.count("CreateProcessA") || func_names.count("CreateProcessW") ||
+            func_names.count("ShellExecuteA") || func_names.count("ShellExecuteW")) {
+            suspicious.push_back("COM + process execution: possible WMI/DCOM lateral movement (T1047)");
+        }
+    }
+
+    // File encryption without user interaction (ransomware)
+    if ((func_names.count("CryptGenKey") || func_names.count("BCryptGenerateSymmetricKey")) &&
+        (func_names.count("CryptEncrypt") || func_names.count("BCryptEncrypt")) &&
+        (func_names.count("CryptExportKey") || func_names.count("BCryptExportKey"))) {
+        suspicious.push_back("Crypto key generation + encryption + export: ransomware indicator (T1486)");
+    }
+
+    // Reflective DLL injection
+    if (func_names.count("VirtualAlloc") &&
+        func_names.count("VirtualProtect") &&
+        func_names.count("FlushInstructionCache")) {
+        suspicious.push_back("Reflective loading: VirtualAlloc + VirtualProtect + FlushInstructionCache (T1620)");
+    }
+
     return suspicious;
 }
 
