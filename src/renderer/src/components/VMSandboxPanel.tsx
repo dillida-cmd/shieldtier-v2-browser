@@ -349,26 +349,15 @@ export default function VMSandboxPanel({ session, files }: VMSandboxPanelProps) 
     try {
       const status = await vm.getQEMUStatus();
 
-      // Windows Sandbox is available — skip QEMU image requirement
+      // Windows Sandbox is available — ready to go
       if (status.windows_sandbox_available) {
         setQemuReady(true);
         setView('ready');
         return;
       }
 
-      if (status.installed) {
-        const imgs = await vm.listImages();
-        setImages(imgs);
-        const anyDownloaded = imgs.some((i: any) => i.downloaded);
-        if (anyDownloaded) {
-          setQemuReady(true);
-          setView('ready');
-        } else {
-          setView('setup');
-        }
-      } else {
-        setView('setup');
-      }
+      // Windows Sandbox not available — show enable prompt
+      setView('setup');
     } catch {
       setView('setup');
     }
@@ -478,7 +467,56 @@ export default function VMSandboxPanel({ session, files }: VMSandboxPanelProps) 
   }
 
   if (view === 'setup') {
-    return <VMSetupWizard onComplete={() => { setQemuReady(true); checkSetup(); }} />;
+    return (
+      <div className="h-full flex items-center justify-center">
+        <div className="max-w-md text-center space-y-6">
+          <div className="w-16 h-16 mx-auto rounded-2xl bg-purple-500/20 flex items-center justify-center">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-purple-400">
+              <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+              <line x1="8" y1="21" x2="16" y2="21"/>
+              <line x1="12" y1="17" x2="12" y2="21"/>
+            </svg>
+          </div>
+          <div>
+            <h2 className="text-lg font-semibold text-[color:var(--st-text-primary)]">Windows Sandbox Required</h2>
+            <p className="text-sm text-[color:var(--st-text-secondary)] mt-2">
+              ShieldTier uses Windows Sandbox to safely execute and analyze malware samples in an isolated environment.
+            </p>
+          </div>
+          <div className="glass-light border border-[color:var(--st-border-subtle)] rounded-lg p-4 text-left space-y-3">
+            <h3 className="text-xs font-medium text-[color:var(--st-text-primary)]">How to enable:</h3>
+            <ol className="text-xs text-[color:var(--st-text-secondary)] space-y-2 list-decimal list-inside">
+              <li>Open <span className="text-[color:var(--st-text-primary)] font-medium">Windows Features</span> (search "Turn Windows features on or off")</li>
+              <li>Check <span className="text-[color:var(--st-text-primary)] font-medium">Windows Sandbox</span></li>
+              <li>Click OK and <span className="text-[color:var(--st-text-primary)] font-medium">restart your computer</span></li>
+              <li>Reopen ShieldTier</li>
+            </ol>
+            <div className="mt-3 pt-3 border-t border-[color:var(--st-border-subtle)]">
+              <p className="text-[10px] text-[color:var(--st-text-muted)]">
+                Requires Windows 10/11 Pro, Enterprise, or Education. Not available on Home edition.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              try {
+                // Open Windows Features dialog
+                (window as any).shieldtier?.view?.navigate?.('', 'optionalfeatures.exe');
+              } catch {}
+            }}
+            className="px-6 py-2.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-sm font-medium transition-colors"
+          >
+            Open Windows Features
+          </button>
+          <button
+            onClick={() => checkSetup()}
+            className="block mx-auto px-4 py-1.5 text-xs text-[color:var(--st-text-muted)] hover:text-[color:var(--st-text-primary)] transition-colors"
+          >
+            Check Again
+          </button>
+        </div>
+      </div>
+    );
   }
 
   // ═══════════════════════════════════════════════════════
